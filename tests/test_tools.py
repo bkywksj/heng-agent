@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import codecs
+import sys
 from pathlib import Path
 
 import pytest
@@ -87,7 +88,11 @@ def test_clip_keeps_head_and_tail() -> None:
     assert out.startswith("头") and out.endswith("尾" * 100) and "省略" in out
 
 
-@pytest.mark.parametrize("raw", ["../x", "a/../../x", "/etc/passwd", "C:/Windows/x"])
+@pytest.mark.parametrize("raw", [
+    "../x", "a/../../x", "/etc/passwd",
+    # 只在 Windows 上是绝对路径；Linux / macOS 上它是个普通的相对路径（叫 C: 的子目录），本来就不该拒
+    pytest.param("C:/Windows/x", marks=pytest.mark.skipif(sys.platform != "win32", reason="Windows 的盘符路径")),
+])  # fmt: skip
 def test_paths_outside_workdir_are_refused(ctx: ToolContext, raw: str) -> None:
     with pytest.raises(AgentError, match="工作目录"):
         resolve_in_workdir(raw, ctx.workdir)

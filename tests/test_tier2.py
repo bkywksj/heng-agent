@@ -127,6 +127,9 @@ def test_slash_commands_run(tmp_path: Path) -> None:
 # ---------- 第二批：Ctrl+R / Ctrl+G / Ctrl+T、脚本模式 ----------
 
 
+_OPEN_PIPES: list[Any] = []
+
+
 def _box(tmp_path: Path, **kw: Any) -> tuple[Any, Any]:
     from prompt_toolkit.history import InMemoryHistory
     from prompt_toolkit.input import create_pipe_input
@@ -138,7 +141,9 @@ def _box(tmp_path: Path, **kw: Any) -> tuple[Any, Any]:
     history = InMemoryHistory()
     for line in kw.pop("history", []):
         history.append_string(line)
-    pipe = create_pipe_input().__enter__()
+    pipe_ctx = create_pipe_input()
+    _OPEN_PIPES.append(pipe_ctx)  # 留住上下文对象，免得被回收时关掉管道（见 test_config_ui._box）
+    pipe = pipe_ctx.__enter__()
     box = InputBox(history=history, commands=SlashCompleter(lambda: {}), workdir=tmp_path, toolbar=lambda: "",
                    get_mode=lambda: "ask", set_mode=lambda m: None, modes=MODES, style=STYLE, input=pipe,
                    output=DummyOutput(), **kw)  # fmt: skip

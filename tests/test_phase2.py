@@ -189,6 +189,7 @@ def test_repl_asks_before_enabling_project_hooks(settings: Settings, monkeypatch
         assert "echo hi" in console.export_text()  # 确认前把要执行的命令完整列出来
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="Git Bash 只在 Windows 上有，路径转换也只发生在那里")
 def test_undo_git_bash_path_conversion(monkeypatch: pytest.MonkeyPatch) -> None:
     # Git Bash 把 -p "/addtest x" 转成 Git 安装目录下的路径；只在三个条件都满足时还原
     monkeypatch.setenv("MSYSTEM", "MINGW64")
