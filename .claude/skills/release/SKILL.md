@@ -26,7 +26,9 @@ description: |
 3. **写 CHANGELOG.md**：最上面加一节，按「交互 / 扩展 / 兼容 / 安全 / 修复」分类写用户看得见的变化；
 4. **检查**：`ruff format`、`ruff check`、全部测试通过；
 5. **提交并打标签**：逐个 `git add`，提交信息「发布 x.y.z」；`git tag -a vx.y.z -m "…"`；
-6. **推送**：Sigil 的 `git_push`，分支与标签各推一次、两个远程（`origin` 用 gitee 凭据、`gitcode` 用 gitcode 凭据）；
+6. **推送**：Sigil 的 `git_push`，分支与标签各推一次、两个远程：`origin`（GitHub，凭据 `github1`）与 `gitee`（Gitee 镜像，凭据 `gitee`）。
+   **推到 GitHub 的标签会触发自动发布**（`.github/workflows/release.yml`）：三个平台跑完测试 → 核对标签与版本号 →
+   构建 → 发布到 PyPI → 建 GitHub Release（说明取自 CHANGELOG.md 这个版本的那一节）；
 7. **构建并装成正式版**（在干净的标签副本里构建，别在工作目录——那样会把没提交的改动也装进去）：
 
    ```bash
@@ -55,6 +57,27 @@ description: |
 
 它写 `~/.local/bin/heng-dev.cmd`（cmd / PowerShell）与 `heng-dev`（Git Bash）。.cmd 开头会切到 UTF-8 再读中文路径、
 跑完切回——**不要改成按固定编码写**（GBK 与 UTF-8 终端里总有一种报「找不到路径」）。
+
+## 仓库
+
+| 仓库 | 地址 | 说明 |
+|---|---|---|
+| 主仓库（公开） | https://github.com/bkywksj/heng-agent | 本地 `E:\my\AI模型\heng-agent` 的 `origin` |
+| 镜像 | https://gitee.com/bkywksj/heng-agent | 本地的 `gitee`，给国内用户；每次推送两边都推 |
+| 开发历史归档（私有） | gitee.com/bkywksj/heng-agent-archive | 本地 `heng-agent-archive`，0.2.0 之前的完整历史，不再更新 |
+
+公开仓库从「0.2.0 首次开源」一个提交开始，和归档的历史不相关（不能互相推送、合并）。
+
+## 第一次发布到 PyPI
+
+用「受信任发布」，不建也不存 API 令牌。第一次发布前由用户在 PyPI 网站上登记一次：
+
+1. 登录 https://pypi.org → 账号的 **Publishing** → **Add a new pending publisher** → 选 GitHub；
+2. 填：PyPI 项目名 `heng-agent`、Owner `bkywksj`、Repository `heng-agent`、Workflow `release.yml`、
+   Environment `pypi`；
+3. 之后推 `v` 开头的标签就会自动发布；第一次发布成功后，这个「待定」发布者自动转成正式的。
+
+发布失败时看 GitHub Actions 的「发布」工作流：版本号与标签不一致会在「构建」一步的注释里说明。
 
 ## 出了问题
 
