@@ -25,8 +25,12 @@ def escape_property(text: str) -> str:
     return escape(text).replace(":", "%3A").replace(",", "%2C")
 
 
-def main(path: str) -> int:
-    root = ET.parse(path).getroot()
+def main(path: str, log_path: str | None = None) -> int:
+    try:
+        root = ET.parse(path).getroot()
+    except (OSError, ET.ParseError) as exc:  # 测试还没出报告就挂了（收集阶段出错、进程崩溃……）
+        print(f"::error title=没有测试报告::{escape(str(exc))}")
+        root = ET.Element("testsuites")
     count = 0
     for case in root.iter("testcase"):
         problem = case.find("failure")
@@ -44,8 +48,17 @@ def main(path: str) -> int:
         tail = "\n".join(body[-12:])
         print(f"::error title={escape_property(name)}::{escape(detail[:500])}%0A{escape(tail[-1500:])}")
     print(f"共 {count} 个测试失败" + (f"（只写了前 {MAX_ANNOTATIONS} 个注释）" if count > MAX_ANNOTATIONS else ""))
+    if count == 0 and log_path:
+        # 报告里找不到是哪个测试失败：把 pytest 输出的末尾写成注释（实际碰到过：失败了却一条注释也没有）
+        try:
+            lines = open(log_path, encoding="utf-8", errors="replace").read().splitlines()
+        except OSError as exc:
+            lines = [f"读不到 pytest 输出：{exc}"]
+        print(f"::error title=pytest 输出末尾::{escape(chr(10).join(lines[-60:])[-6000:])}")
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main(sys.argv[1] if len(sys.argv) > 1 else "report.xml"))
+    raise SystemExit(
+        main(sys.argv[1] if len(sys.argv) > 1 else "report.xml", sys.argv[2] if len(sys.argv) > 2 else None)
+    )

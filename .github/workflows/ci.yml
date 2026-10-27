@@ -30,13 +30,18 @@ jobs:
           uv run ruff format --check src tests
           uv run ruff check src tests
       - name: 测试
-        shell: bash  # 各平台用同一种 shell，下面的 || 写法才一致
-        # 失败时把每个失败的测试写成 GitHub 注释：网页上直接看得到原因，也能用 API 读（完整日志要跳转下载）
+        shell: bash  # 各平台用同一种 shell，下面的写法才一致
+        timeout-minutes: 15  # 有测试卡住（如等键盘输入）时别一直挂着
+        # 失败时把每个失败的测试写成 GitHub 注释：网页上直接看得到原因，也能用 API 读（完整日志要管理员权限下载）。
+        # 报告里找不到具体哪个测试（收集阶段出错、进程崩溃）时，把 pytest 输出的末尾写成注释
         run: |
-          uv run python -m pytest -q -rf --junitxml=report.xml || {
-            uv run python scripts/ci_annotate.py report.xml
-            exit 1
-          }
+          set +e
+          uv run python -m pytest -q -rf --junitxml=report.xml 2>&1 | tee pytest.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            uv run python scripts/ci_annotate.py report.xml pytest.log
+          fi
+          exit "$status"
       - name: 构建安装包并检查内容
         shell: bash
         run: |
