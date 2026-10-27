@@ -1,0 +1,91 @@
+# 发布：推送 v 开头的标签（如 v0.3.0）→ 三个平台跑完测试 → 构建 → 发布到 PyPI 与 GitHub Release。
+#
+# 发布到 PyPI 用「受信任发布」（Trusted Publishing）：GitHub 与 PyPI 之间凭身份对接，不用建、不用存任何 API 令牌。
+# 第一次发布前要在 PyPI 网站上登记一次（见 .claude/skills/release/SKILL.md 的「第一次发布到 PyPI」）。
+name: 发布
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  test:
+    name: 测试 · ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    env:
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - run: uv sync --extra dev
+      - run: uv run python -m pytest -q
+
+  build:
+    name: 构建
+    needs: test  # 任何一个平台的测试没过都不发布
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: 标签与版本号要一致
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          version=$(grep -m1 '^version = ' pyproject.toml | cut -d'"' -f2)
+          if [ "$tag" != "$version" ]; then
+            echo "::error title=版本号不一致::标签是 v$tag，pyproject.toml 里是 $version——先改版本号再打标签"
+            exit 1
+          fi
+      - run: uv build  # 源码包与 wheel
+      - name: 检查安装包内容
+        run: |
+          uv run --with twine twine check dist/*
+          python3 -c "import zipfile, glob; n = zipfile.ZipFile(glob.glob('dist/*.whl')[0]).namelist(); assert any('/prompts/' in x for x in n), '安装包里没有内置提示词'"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  pypi:
+    name: 发布到 PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/heng-agent/
+    permissions:
+      id-token: write  # 受信任发布要用：向 PyPI 证明「我是这个仓库的这个工作流」
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  github-release:
+    name: GitHub Release
+    needs: pypi
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: 从 CHANGELOG 取这个版本的说明并建 Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          # 取 CHANGELOG.md 里「## 版本号」那一节，到下一个「## 」为止
+          awk -v v="$version" '$0 ~ "^## "v"([ （(]|$)" {on=1; next} on && /^## / {exit} on {print}' CHANGELOG.md > notes.md
+          [ -s notes.md ] || echo "见 CHANGELOG.md" > notes.md
+          gh release create "$GITHUB_REF_NAME" dist/* --title "heng-agent $version" --notes-file notes.md
