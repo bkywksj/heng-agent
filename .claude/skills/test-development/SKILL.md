@@ -56,6 +56,15 @@ PYTHONIOENCODING=utf-8 .venv/Scripts/python.exe -m pytest -q
   要用就拼接字符串；
 - 只读用户的真实配置，不改；要改的话在开发版的数据目录里改。
 
+## 跨平台（CI 在 Windows / macOS / Linux 上都跑）
+
+本地只有 Windows，别的平台的问题靠 CI 发现。CI 失败时每个失败的测试会写成 GitHub 注释，公开仓库不用凭据就能读：
+`https://api.github.com/repos/bkywksj/heng-agent/check-runs/<任务 id>/annotations`（任务 id 从
+`/actions/runs/<运行 id>/jobs` 取；完整日志要管理员权限才能下载）。每个步骤最多显示 10 条错误注释。
+
+写测试时避开只在 Windows 上成立的写法（详见 CLAUDE.md「绝对禁止」）：模拟输入的管道上下文要留住；
+测「选择器用不了」这类路径要明确指定、别依赖环境；盘符路径、Git Bash 行为的用例只在 Windows 上跑。
+
 ## 测试失败时
 
 - 先看是测试写错了还是代码错了：断言的文字被格式化折行、`export_text` 调了两次、中文宽度——这些是测试的问题；

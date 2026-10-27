@@ -79,6 +79,9 @@ core                消息与事件的数据类型、配置、错误、信任记
 | 很长的 heredoc / `python -c` | 会被截断或转义出错 | 先写成文件再运行 |
 | `git push` / `fetch` / `pull` | 会弹凭据窗卡住 | 推送走 Sigil |
 | `ruff format` 后拿旧文字精确替换 | 格式化会把长行拆开，对不上 | 先看当前原文再改 |
+| `pipe = create_pipe_input().__enter__()`（不留上下文对象） | 函数一返回上下文对象被回收、管道随之关掉；Windows 的模拟输入关了还能写，Linux / macOS 是真管道，报 Bad file descriptor 或读到输入结束 | 把上下文对象存起来（见 `tests/test_config_ui.py` 的 `_OPEN_PIPES`），或用 `with` |
+| 测试的结果依赖「当前环境有没有终端、选择器能不能开」 | Windows CI 碰巧没有控制台走了一条路，Linux 上走了另一条；选择器读到输入结束会当成取消、抛 KeyboardInterrupt 让整轮测试中断 | 测哪条路就明确指定（monkeypatch `_choose`、`_stdin_is_terminal`） |
+| 用 `C:/…` 当「工作目录外的路径」、测 Git Bash 行为却不限平台 | 盘符路径只在 Windows 上是绝对路径；Git Bash 只在 Windows 上有 | 只在 Windows 上成立的用例加 `skipif(sys.platform != "win32")` |
 
 ## 技能索引（`.claude/skills/`，Claude Code、智码与 heng-dev 都读）
 
