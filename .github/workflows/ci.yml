@@ -30,7 +30,13 @@ jobs:
           uv run ruff format --check src tests
           uv run ruff check src tests
       - name: 测试
-        run: uv run python -m pytest -q
+        shell: bash  # 各平台用同一种 shell，下面的 || 写法才一致
+        # 失败时把每个失败的测试写成 GitHub 注释：网页上直接看得到原因，也能用 API 读（完整日志要跳转下载）
+        run: |
+          uv run python -m pytest -q -rf --junitxml=report.xml || {
+            uv run python scripts/ci_annotate.py report.xml
+            exit 1
+          }
       - name: 构建安装包并检查内容
         shell: bash
         run: |
