@@ -6,10 +6,24 @@
 
 ## 安装
 
-需要先装好 [uv](https://docs.astral.sh/uv/)（Python 的包管理工具，会自动准备好 Python）：
+一条命令装好（没有 uv 会先自动装 uv；pypi.org 连不上会自动改用清华镜像；已装过就升级到最新版）：
+
+```powershell
+# Windows（PowerShell）
+irm https://gitee.com/bkywksj/heng-agent/raw/master/install.ps1 | iex
+```
 
 ```bash
-uv tool install heng-agent      # 装成全局命令，任何目录都能敲 heng-agent（发布到 PyPI 之后）
+# macOS / Linux
+curl -LsSf https://gitee.com/bkywksj/heng-agent/raw/master/install.sh | sh
+```
+
+（在国外把地址换成 `https://raw.githubusercontent.com/bkywksj/heng-agent/master/install.ps1`、`…/install.sh`。）
+
+已经有 [uv](https://docs.astral.sh/uv/)（Python 的包管理工具，会自动准备好 Python）的话，也可以直接：
+
+```bash
+uv tool install heng-agent      # 装成全局命令，任何目录都能敲 heng-agent
 uv tool upgrade heng-agent      # 升级
 uv tool uninstall heng-agent    # 卸载
 ```
