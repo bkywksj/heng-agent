@@ -13,6 +13,7 @@ from heng_agent import cli
 from heng_agent.agent import Agent
 from heng_agent.core.config import Settings
 from heng_agent.core.types import TextDelta, ToolFinished, ToolResult, ToolStarted, TurnDone
+from heng_agent.ui import repl as repl_module
 from heng_agent.ui.repl import Repl
 
 
@@ -99,6 +100,8 @@ def test_event_rendering(tmp_path: Path) -> None:
 
 def test_approve_shows_diff_and_parses_answers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     repl, console = _repl(tmp_path)
+    # 测的是「选择器用不了时退回打字」：明确指定，别依赖环境（Windows CI 上恰好用不了，Linux 上用得了、走了另一条路）
+    monkeypatch.setattr(repl, "_choose", lambda *a, **kw: repl_module._PLAIN)
     answers = iter(["随便", "a"])
     monkeypatch.setattr(console, "input", lambda prompt="": next(answers))
     tool = repl.agent.tools["edit_file"]

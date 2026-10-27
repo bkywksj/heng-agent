@@ -66,8 +66,14 @@ def test_paste_paths_become_mentions(tmp_path: Path) -> None:
     assert paths_in_paste(f"看看 {work / 'app.py'}") is None
 
 
+#: 留住管道的上下文对象：只拿 __enter__() 的返回值的话，函数一返回上下文对象就被回收、管道随之关掉——
+#: Windows 上的模拟输入关了还能写，Linux / macOS 是真的管道，再写就报 Bad file descriptor（CI 上踩过）
+_OPEN_PIPES: list[Any] = []
+
+
 def _box(tmp_path: Path, **kw: Any) -> tuple[InputBox, Any]:
     pipe_ctx = create_pipe_input()
+    _OPEN_PIPES.append(pipe_ctx)
     pipe = pipe_ctx.__enter__()
     box = InputBox(history=InMemoryHistory(), commands=SlashCompleter(lambda: {}), workdir=tmp_path,
                    toolbar=lambda: "", get_mode=lambda: "ask", set_mode=lambda m: None, modes=MODES, style=STYLE,

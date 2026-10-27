@@ -45,8 +45,13 @@ def test_selector_keys() -> None:
     assert _choose("", later=ESC) is None  # 单独的 ESC：取消
 
 
+_OPEN_PIPES: list[Any] = []  # 留住上下文对象，免得被回收时关掉管道（见 test_config_ui._box）
+
+
 def _box() -> tuple[InputBox, Any]:
-    pipe = create_pipe_input().__enter__()
+    pipe_ctx = create_pipe_input()
+    _OPEN_PIPES.append(pipe_ctx)
+    pipe = pipe_ctx.__enter__()
     box = InputBox(history=InMemoryHistory(), commands=SlashCompleter(lambda: {}), workdir=Path.cwd(),
                    toolbar=lambda: "", get_mode=lambda: "ask", set_mode=lambda m: None, modes=MODES, style=STYLE,
                    input=pipe, output=DummyOutput())  # fmt: skip
