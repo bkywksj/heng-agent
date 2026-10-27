@@ -1,0 +1,38 @@
+# 每次推送、每个合并请求：在 Windows / macOS / Linux 与 Python 3.11 / 3.13 上跑代码检查与全部测试。
+# 本地开发只在 Windows 上测过，开源后各平台的问题靠它及早发现。
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+jobs:
+  test:
+    name: ${{ matrix.os }} · Python ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false  # 一个平台挂了不影响看其他平台的结果
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+        python: ["3.11", "3.13"]
+    env:
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python }}
+      - name: 装依赖
+        run: uv sync --extra dev  # pytest、ruff 在可选依赖 dev 里，不加 --extra 不会装
+      - name: 代码检查
+        run: |
+          uv run ruff format --check src tests
+          uv run ruff check src tests
+      - name: 测试
+        run: uv run python -m pytest -q
+      - name: 构建安装包并检查内容
+        shell: bash
+        run: |
+          uv build --wheel
+          uv run python -c "import zipfile, glob; names = zipfile.ZipFile(glob.glob('dist/*.whl')[0]).namelist(); prompts = [n for n in names if n.endswith('.md') and '/prompts/' in n]; assert prompts, '安装包里没有内置提示词'; print('内置提示词：', prompts)"

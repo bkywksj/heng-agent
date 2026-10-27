@@ -1,0 +1,419 @@
+"""命令行入口：交互模式（默认）与 -p 非交互模式。"""
+
+from __future__ import annotations
+
+import argparse
+import contextlib
+import json
+import os
+import shutil
+import sys
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+from heng_agent import configfile, worktree
+from heng_agent.agent import Agent
+from heng_agent.attachments import absorb_paths
+from heng_agent.commands import discover_commands, expand_command, shell_runner
+from heng_agent.context import expand_mentions, mention_images
+from heng_agent.core.config import Settings
+from heng_agent.core.errors import AgentError
+from heng_agent.core.types import AgentEvent, Notice, TextDelta, ToolFinished, ToolStarted
+from heng_agent.core.version import prepare_dev_home, version_label
+from heng_agent.hooks import is_trusted, load_hooks
+from heng_agent.mcp import MCPManager, load_servers
+from heng_agent.mcp import is_trusted as mcp_is_trusted
+from heng_agent.model.client import make_client
+from heng_agent.model.providers import PROJECT_CONFIG, Profile, config_path, load_profiles
+from heng_agent.permissions import Permissions, Rules
+from heng_agent.session import SessionStore
+from heng_agent.tools.base import Tool, builtin_tools
+
+
+def _utf8_console() -> None:
+    """Windows 控制台默认 GBK：中文输出会乱码甚至报错，程序自己切成 UTF-8。"""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            with contextlib.suppress(ValueError, OSError):
+                reconfigure(encoding="utf-8", errors="replace")
+
+
+def _enable_vt() -> None:
+    """Windows：开启控制台的 VT 序列处理。
+
+    控制台默认没开这个开关，rich 检测到就把终端当成老式控制台：只用 16 色、不输出超链接
+    （实测 Windows Terminal 里新开的 PowerShell 也是 legacy_windows=True）。先开开关再建 rich 的 Console，
+    就是真彩色 + 超链接。非 Windows、或输出不是控制台（被重定向）时什么都不做。
+    """
+    if sys.platform != "win32":
+        return
+    import ctypes
+
+    kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+    for std in (-11, -12):  # STD_OUTPUT_HANDLE、STD_ERROR_HANDLE
+        handle = kernel32.GetStdHandle(std)
+        mode = ctypes.c_uint32()
+        if kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
+            kernel32.SetConsoleMode(handle, mode.value | 0x0004)  # ENABLE_VIRTUAL_TERMINAL_PROCESSING
+
+
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(prog="heng-agent", description="终端编码智能体：读代码、改代码、跑命令。")
+    p.add_argument("--version", action="version", version=f"heng-agent {version_label()}")
+    p.add_argument(
+        "-p",
+        "--print",
+        dest="prompt",
+        nargs="?",
+        const="",
+        default=None,
+        help="非交互：执行这一个任务后退出；管道传进来的内容会附在后面（只写 -p 就把管道内容当问题）",
+    )
+    p.add_argument(
+        "--output-format",
+        choices=("text", "json", "stream-json"),
+        default="text",
+        help="-p 的输出：text 普通文字；json 最后输出一个对象；stream-json 每个事件一行 JSON",
+    )
+    p.add_argument(
+        "--allowed-tools",
+        action="append",
+        default=[],
+        metavar="规则",
+        help='这次运行额外允许的规则，逗号分隔，如 "bash(npm test),edit_file"（-p 没人可问，默认都拒绝）',
+    )
+    p.add_argument("--disallowed-tools", action="append", default=[], metavar="规则",
+                   help="这次运行额外拒绝的规则，逗号分隔，如 \"bash(git push*)\"")  # fmt: skip
+    p.add_argument(
+        "--provider",
+        default=None,
+        help="服务商配置档（heng / deepseek / kimi / glm / qwen / …），缺省用配置文件的 default",
+    )
+    p.add_argument("--list-providers", action="store_true", help="列出可用的服务商配置档与密钥是否已配置")
+    p.add_argument("--base-url", default=None, help="临时覆盖配置档的地址")
+    p.add_argument("--model", default=None, help="临时覆盖配置档的模型名")
+    p.add_argument("--permission-mode", choices=["ask", "accept-edits", "plan", "auto"], default=None)
+    p.add_argument("--workdir", default=None, help="工作目录，默认当前目录")
+    p.add_argument(
+        "--home",
+        default=None,
+        help="用户级目录（配置、会话、历史），默认正式版 ~/.heng-agent、开发版 ~/.heng-agent-dev；"
+        "也可用环境变量 HENG_AGENT_HOME",
+    )
+    p.add_argument(
+        "--resume", "-r", nargs="?", const="", default=None, metavar="会话 id",
+        help="接着聊：不带 id 接这个目录最近的会话，带 id（或前缀）接指定的",
+    )  # fmt: skip
+    p.add_argument("-c", "--continue", dest="resume", action="store_const", const="",
+                   help="接着这个目录最近的会话聊（同 --resume 不带 id）")  # fmt: skip
+    p.add_argument("--sessions", action="store_true", help="列出这个目录的会话")
+    p.add_argument("-w", "--worktree", default=None, metavar="名字",
+                   help="在独立的 git 工作树里工作（分支 heng/名字），不碰主分支")  # fmt: skip
+    return p
+
+
+def make_settings(args: argparse.Namespace) -> Settings:
+    """优先级：命令行参数 > 项目配置 settings 段 > 用户配置 settings 段 > 内置默认值。"""
+    overrides: dict[str, Any] = {}
+    for key in ("provider", "base_url", "model", "permission_mode"):
+        if getattr(args, key) is not None:
+            overrides[key] = getattr(args, key)
+    if args.workdir:
+        overrides["workdir"] = Path(args.workdir).resolve()
+    if args.home:
+        overrides["home"] = Path(args.home).resolve()
+    base = Settings(**overrides)  # 先定下用户目录与工作目录，才知道去哪读配置文件
+    note = prepare_dev_home(base.home)  # 开发版第一次运行：从正式版复制一份配置
+    if note:
+        print(f"⋯ {note}", file=sys.stderr)
+    unknown = configfile.unknown_settings(base.home, base.workdir)
+    if unknown:  # 可能是新版写进去的：提一句、忽略，照样启动
+        print(f"⋯ 配置里有这个版本不认识的设置（已忽略，可能是新版写的）：{', '.join(unknown)}", file=sys.stderr)
+    from_file = configfile.settings_overrides(base.home, base.workdir)
+    return Settings(**{**from_file, **overrides, "home": base.home, "workdir": base.workdir})
+
+
+def resolve_profile(settings: Settings) -> tuple[str, Profile]:
+    """按 --provider（或配置文件的 default）取配置档，再套上命令行的 --base-url / --model 临时覆盖。"""
+    profiles, default = load_profiles(settings.home, settings.workdir)
+    name = settings.provider or default
+    if name not in profiles:
+        raise AgentError(f"没有叫「{name}」的服务商配置档，可选：{', '.join(profiles)}")
+    overrides = {k: v for k, v in (("base_url", settings.base_url), ("model", settings.model)) if v}
+    return name, profiles[name].model_copy(update=overrides)
+
+
+def list_providers(settings: Settings) -> int:
+    profiles, default = load_profiles(settings.home, settings.workdir)
+    project = settings.workdir / PROJECT_CONFIG
+    note = f"；项目配置 {project}" if project.is_file() else ""
+    print(f"配置文件：{config_path(settings.home)}{note}（默认 {default}）\n")
+    for name, p in profiles.items():
+        if p.api_key:
+            key = "密钥：已写在配置文件"
+        elif p.api_key_env:
+            key = f"密钥：{p.api_key_env} {'已设置' if p.resolve_key() else '未设置'}"
+        else:
+            key = "不需要密钥"
+        mark = "*" if name == default else " "
+        print(f"{mark} {name:<12} {p.protocol:<9} {p.model:<24} {p.base_url}\n               {key}　{p.note}")
+    return 0
+
+
+def list_sessions(settings: Settings) -> int:
+    sessions = SessionStore.all(settings.home, settings.workdir)
+    if not sessions:
+        print("这个目录还没有会话。")
+        return 0
+    for s in sessions:
+        when = datetime.fromtimestamp(s.updated).strftime("%m-%d %H:%M")
+        print(f"{s.id}  {when}  {s.messages:>3} 条  {s.first_question[:40]}")
+    print("\n接着聊：heng-agent --resume <id 或前缀>")
+    return 0
+
+
+def undo_msys_pathconv(prompt: str, command_names: set[str]) -> str:
+    """Git Bash 调用 Windows 程序时会把以 / 开头的参数当成路径转换：`-p "/addtest x"` 到这里变成
+    `D:/software/dev/Git/addtest x`。三个条件都满足才还原，不误伤普通输入：在 Git Bash 里（有 MSYSTEM）、
+    以 Git 安装目录开头、剩下的第一段确实是已定义的自定义命令。
+    """
+    if not os.environ.get("MSYSTEM") or not command_names:
+        return prompt
+    roots = set()
+    if os.environ.get("EXEPATH"):
+        exe = Path(os.environ["EXEPATH"])
+        roots |= {exe, exe.parent}
+    bash = shutil.which("bash")
+    if bash:
+        roots |= set(Path(bash).resolve().parents[:3])
+    normalized = prompt.replace("\\", "/")
+    for root in sorted(roots, key=lambda r: len(str(r)), reverse=True):
+        prefix = str(root).replace("\\", "/").rstrip("/") + "/"
+        if normalized.lower().startswith(prefix.lower()):
+            rest = normalized[len(prefix) :]
+            if rest.split(" ", 1)[0] in command_names:
+                return "/" + rest
+    return prompt
+
+
+def read_piped_stdin() -> str:
+    """管道传进来的内容（`cat 日志 | heng-agent -p "分析"`）；直接在终端里运行（没有管道）时返回空。"""
+    try:
+        if sys.stdin is None or sys.stdin.isatty():
+            return ""
+        return sys.stdin.read()
+    except (OSError, ValueError):  # 标准输入被关掉或被别处接管（如测试框架）
+        return ""
+
+
+def split_rules(values: list[str]) -> list[str]:
+    """--allowed-tools 的值按逗号拆成规则；括号里的逗号不拆（`bash(git log --format=%h,%s)` 是一条）。"""
+    rules: list[str] = []
+    for value in values:
+        depth, current = 0, ""
+        for ch in value:
+            depth += (ch == "(") - (ch == ")")
+            if ch == "," and depth == 0:
+                rules.append(current.strip())
+                current = ""
+            else:
+                current += ch
+        rules.append(current.strip())
+    return [r for r in rules if r]
+
+
+def run_print_mode(agent: Agent, prompt: str, output_format: str = "text") -> int:
+    """非交互：执行一个任务后退出。需要确认的操作一律拒绝（没人可问；用 --allowed-tools 事先放行）。
+
+    text：文字写标准输出，工具执行情况写标准错误；
+    json：结束时在标准输出写一个 JSON 对象（result、session_id、usage、rounds、is_error）；
+    stream-json：每个事件一行 JSON（text / tool_start / tool_end / notice / done），供别的程序实时展示进度。
+    """
+    texts: list[str] = []
+
+    def emit(obj: dict[str, Any]) -> None:
+        print(json.dumps(obj, ensure_ascii=False), flush=True)
+
+    def on_event(event: AgentEvent) -> None:
+        if isinstance(event, TextDelta):
+            texts.append(event.text)
+        if output_format == "stream-json":
+            if isinstance(event, TextDelta):
+                emit({"type": "text", "text": event.text})
+            elif isinstance(event, ToolStarted):
+                emit({"type": "tool_start", "id": event.id, "name": event.name, "input": event.input})
+            elif isinstance(event, ToolFinished):
+                emit({"type": "tool_end", "id": event.id, "name": event.name, "denied": event.denied,
+                      "is_error": event.result.is_error, "content": event.result.content[:2000]})  # fmt: skip
+            elif isinstance(event, Notice):
+                emit({"type": "notice", "text": event.text})
+            return
+        if output_format == "json":
+            return  # 结束时一次性输出
+        if isinstance(event, TextDelta):
+            print(event.text, end="", flush=True)
+        elif isinstance(event, ToolStarted):
+            print(f"\n● {event.name} {event.input}", file=sys.stderr, flush=True)
+        elif isinstance(event, ToolFinished) and event.denied:
+            print("  ⎿ 已拒绝（非交互模式不确认；用 --allowed-tools 放行，或 --permission-mode accept-edits）",
+                  file=sys.stderr)  # fmt: skip
+        elif isinstance(event, Notice):
+            print(f"⋯ {event.text}", file=sys.stderr, flush=True)
+
+    if hasattr(agent.client, "on_retry"):
+        agent.client.on_retry = lambda msg: on_event(Notice(msg))  # type: ignore[attr-defined]
+
+    def approve(tool: Tool, args: dict[str, Any]) -> Any:
+        return "deny"
+
+    workdir = agent.settings.workdir
+    prompt, _ = absorb_paths(prompt, workdir)  # 消息里的文件绝对路径 → @（外部文件复制进附件目录）
+    images, _ = mention_images(prompt, workdir)
+    session_id = agent.session.id if agent.session else None
+    try:
+        done = agent.run(expand_mentions(prompt, workdir)[0], on_event, approve, images=images)
+    except AgentError as exc:
+        if output_format == "text":
+            raise
+        emit({"type": "done", "is_error": True, "error": str(exc), "result": "".join(texts), "session_id": session_id})
+        return 1
+    finally:
+        stopped = agent.ctx.tasks.kill_all()  # -p 跑完就退出：后台任务不能留着没人管
+        if stopped:
+            print(f"⋯ 已停止 {stopped} 个后台任务（-p 模式结束时不保留后台任务）", file=sys.stderr)
+    if output_format == "text":
+        print()
+    else:
+        summary = {"result": "".join(texts), "session_id": session_id, "usage": done.usage,
+                   "rounds": done.rounds, "is_error": False}  # fmt: skip
+        emit({"type": "done", **summary} if output_format == "stream-json" else summary)
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    _utf8_console()
+    _enable_vt()  # 必须在建 rich Console 之前：否则 rich 按老式控制台渲染（16 色、无超链接）
+    # 必须在任何提示、选择器之前：prompt_toolkit 的输入读取器建一次就缓存，晚了 Shift+Enter 就分不出来了
+    from heng_agent.ui.winkeys import enable_shift_enter
+
+    if not enable_shift_enter() and sys.platform == "win32":
+        # 以前补丁因为导入路径写错静默失效，Shift+Enter 一直不能换行却没人发现：失败了要说出来
+        print("⋯ Shift+Enter 换行没能启用（prompt_toolkit 版本变了？），可以先用 Ctrl+J 换行", file=sys.stderr)
+    args = build_parser().parse_args(argv)
+    try:
+        settings = make_settings(args)  # 会读配置文件的 settings 段：写错了要给出可读的错误，而不是一堆堆栈
+        if args.worktree:  # -w 名字：在独立的 git 工作树（独立分支）里干活，整个会话从那里开始
+            created = worktree.create(worktree.repo_root(settings.workdir), args.worktree)
+            settings = settings.model_copy(update={"workdir": created.path})
+            print(f"⋯ 在工作树 {args.worktree} 里工作（分支 {created.branch}）：{created.path}", file=sys.stderr)
+    except (AgentError, ValueError) as exc:
+        print(f"错误：{exc}", file=sys.stderr)
+        return 1
+    try:
+        if args.list_providers:
+            return list_providers(settings)
+        if args.sessions:
+            return list_sessions(settings)
+        provider_name, profile = resolve_profile(settings)
+        session = None
+        if args.resume is not None:
+            session = (
+                SessionStore.find(settings.home, settings.workdir, args.resume)
+                if args.resume
+                else SessionStore.latest(settings.home, settings.workdir)
+            )
+    except AgentError as exc:
+        print(f"错误：{exc}", file=sys.stderr)
+        return 1
+    client = make_client(profile, settings.max_tokens)
+    try:
+        user_hooks, project_hooks = load_hooks(
+            settings.home, settings.workdir, claude_user=settings.claude_user_config, skip=settings.claude_hooks_skip
+        )
+    except AgentError as exc:
+        print(f"错误：{exc}", file=sys.stderr)
+        return 1
+    trusted = is_trusted(settings.home, settings.workdir, project_hooks)
+    hooks = user_hooks + (project_hooks if trusted else [])
+    try:
+        user_mcp, project_mcp = load_servers(settings.home, settings.workdir)
+    except AgentError as exc:
+        print(f"错误：{exc}", file=sys.stderr)
+        return 1
+    mcp_trusted = mcp_is_trusted(settings.home, settings.workdir, project_mcp)
+    manager = MCPManager(user_mcp + (project_mcp if mcp_trusted else []), settings.workdir)
+    if args.prompt is not None:  # 交互模式由欢迎页逐行显示连接状态，这里只管非交互
+        for error in manager.errors:
+            print(f"⋯ {error}（跳过这个 MCP 服务）", file=sys.stderr)
+    try:
+        allow, deny, ignored, _ = configfile.permission_rules(
+            settings.home, settings.workdir, claude_user=settings.claude_user_config
+        )
+    except AgentError as exc:
+        print(f"错误：{exc}", file=sys.stderr)
+        manager.close()
+        return 1
+    if ignored:
+        print(f"⋯ 项目配置里的允许规则已忽略（只有用户配置能加允许）：{', '.join(ignored)}", file=sys.stderr)
+    agent = Agent(
+        settings,
+        client,
+        tools=[*builtin_tools(), *manager.tools],
+        permissions=Permissions(
+            settings.permission_mode,
+            Rules(allow + split_rules(args.allowed_tools), deny + split_rules(args.disallowed_tools)),
+        ),
+        session=session or SessionStore(settings.home, settings.workdir),
+        hooks=hooks,
+    )
+    if session is not None:
+        n = agent.resume(session)
+        print(f"已接上会话 {session.id}（{n} 条消息）", file=sys.stderr)
+    elif args.resume is not None:
+        print("这个目录还没有会话，开始新会话。", file=sys.stderr)
+    try:
+        if args.prompt is not None:
+            if (project_hooks and not trusted) or (project_mcp and not mcp_trusted):
+                print(
+                    "⋯ 这个项目的钩子 / MCP 服务还没被信任，本次跳过（在交互模式里确认一次即可）。",
+                    file=sys.stderr,
+                )
+            commands = discover_commands(settings.home, settings.workdir, claude_user=settings.claude_user_config)
+            prompt = undo_msys_pathconv(args.prompt, set(commands))
+            command = commands.get(prompt[1:].split(" ", 1)[0]) if prompt.startswith("/") else None
+            # 命令里的 !`命令`：用户级的照跑；项目里的跟着仓库来、脚本模式又没法问，只在 auto 时跑
+            trusted = command is not None and (not command.project or settings.permission_mode == "auto")
+            runner = shell_runner(settings.workdir, settings.bash_timeout) if trusted else None
+            prompt = expand_command(prompt, commands, runner) or prompt
+            piped = read_piped_stdin()
+            if piped.strip():
+                prompt = f"{prompt}\n\n以下是通过管道传进来的内容：\n```\n{piped.rstrip()}\n```" if prompt else piped
+            if not prompt.strip():
+                print("错误：-p 后面没有问题，管道里也没有内容", file=sys.stderr)
+                return 1
+            return run_print_mode(agent, prompt, args.output_format)
+        from heng_agent.ui.repl import Repl  # 交互界面依赖较重，非交互模式不加载
+
+        repl = Repl(
+            agent,
+            untrusted_hooks=[] if trusted else project_hooks,
+            untrusted_mcp=[] if mcp_trusted else project_mcp,
+            provider_name=provider_name,
+            mcp_status=manager.status,
+        )
+        repl.mcp_managers.insert(0, manager)  # /mcp reconnect / disable 要找得到用户配置里的服务
+        try:
+            return repl.loop()
+        finally:
+            repl.close()
+    except AgentError as exc:
+        print(f"错误：{exc}", file=sys.stderr)
+        return 1
+    finally:
+        manager.close()  # 不管怎么退出，都把 MCP 服务的进程树关掉
+
+
+if __name__ == "__main__":
+    sys.exit(main())
