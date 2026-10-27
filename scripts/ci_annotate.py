@@ -51,7 +51,8 @@ def main(path: str, log_path: str | None = None) -> int:
     if count == 0 and log_path:
         # 报告里找不到是哪个测试失败：把 pytest 输出的末尾写成注释（实际碰到过：失败了却一条注释也没有）
         try:
-            lines = open(log_path, encoding="utf-8", errors="replace").read().splitlines()
+            with open(log_path, encoding="utf-8", errors="replace") as log:
+                lines = log.read().splitlines()
         except OSError as exc:
             lines = [f"读不到 pytest 输出：{exc}"]
         print(f"::error title=pytest 输出末尾::{escape(chr(10).join(lines[-60:])[-6000:])}")
@@ -59,6 +60,5 @@ def main(path: str, log_path: str | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(
-        main(sys.argv[1] if len(sys.argv) > 1 else "report.xml", sys.argv[2] if len(sys.argv) > 2 else None)
-    )
+    args = sys.argv[1:]
+    raise SystemExit(main(args[0] if args else "report.xml", args[1] if len(args) > 1 else None))

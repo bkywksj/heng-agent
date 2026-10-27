@@ -8,6 +8,7 @@ import difflib
 import json
 import os
 import re
+import sys
 import threading
 import time
 from collections.abc import Callable, Iterator
@@ -205,6 +206,16 @@ def edit_in_editor(text: str) -> str | None:
 
 
 _PLAIN = object()  # _choose 的返回值：选择器用不了，调用方退回打字
+
+
+def _stdin_is_terminal() -> bool:
+    """标准输入是不是终端（脚本、管道、CI、测试里不是）：不是就用不了方向键选择器。"""
+    try:
+        return sys.stdin is not None and sys.stdin.isatty()
+    except (AttributeError, ValueError):  # 被替换成别的对象、或已关闭
+        return False
+
+
 _FENCE = re.compile(r"^\s*(```|~~~)", re.MULTILINE)
 _URL = re.compile(r"(?<![<(\[\w])(https?://[^\s<>()（）\[\]【】，。；：！？、\"'`]+)")
 
@@ -640,8 +651,13 @@ class Repl:
             self.console.print(f"[yellow]规则没能写进配置（这次仍然允许）：{escape(str(exc))}[/]")
 
     def _choose(self, title: str, options: list[Option], default: int = 0) -> str | object | None:
-        """方向键选择器；用不了（没有原生控制台的终端、测试）返回 _PLAIN，由调用方退回打字。"""
-        if self._plain_input:
+        """方向键选择器；用不了（没有原生控制台的终端、测试）返回 _PLAIN，由调用方退回打字。
+
+        标准输入不是终端（脚本、管道、CI）时直接退回打字：不然选择器读到「输入结束」会当成用户按 ESC 取消、
+        抛出中断——CI 上第一次在 Linux / macOS 跑，配置向导就这样被当成取消，整轮测试被中断（Windows 上
+        碰巧因为没有原生控制台、走了另一条路才没暴露）。
+        """
+        if self._plain_input or not _stdin_is_terminal():
             return _PLAIN
         try:
             return choose(title, options, default=default)

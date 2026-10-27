@@ -145,3 +145,16 @@ def test_compact_command_and_notices(tmp_path: Path) -> None:
     repl.on_event(Notice("模型服务返回 529；2 秒后重试"))
     text = console.export_text()
     assert "已压缩" in text and "529" in text
+
+
+def test_choose_without_terminal_falls_back_to_typing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """回归：标准输入不是终端（脚本、管道、CI）时不能开选择器——选择器读到「输入结束」会当成按了 ESC 取消，
+    CI 上第一次在 Linux / macOS 跑，配置向导就这样被当成取消、抛出中断，整轮测试被打断。"""
+    repl, _ = _repl(tmp_path)
+
+    def must_not_open(*a: Any, **kw: Any) -> str:
+        raise AssertionError("标准输入不是终端时不该开选择器")
+
+    monkeypatch.setattr(repl_module, "choose", must_not_open)
+    monkeypatch.setattr(repl_module, "_stdin_is_terminal", lambda: False)
+    assert repl._choose("选一个", []) is repl_module._PLAIN
