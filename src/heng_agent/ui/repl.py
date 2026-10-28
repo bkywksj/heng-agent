@@ -330,6 +330,7 @@ class Repl:
         self.mcp_status = list(mcp_status or [])  # 用户级 MCP 服务的连接情况（cli 启动），项目级的信任后追加
         self.mcp_managers: list[MCPManager] = []  # 用户级（cli 启动）与信任后启动的项目 MCP 服务；重连、退出时关掉
         self.mcp_disabled: set[str] = set()  # 本会话用 /mcp disable 停用的服务
+        self._mcp_synced: set[int] = set()  # 已把工具接进智能体的后台 MCP 管理器（id），见 _sync_mcp
         self.commands = discover_commands(
             agent.settings.home, agent.settings.workdir, claude_user=agent.settings.claude_user_config
         )
@@ -903,6 +904,8 @@ class Repl:
         model = f"{p.model}  [dim]{escape(p.base_url)}（{p.protocol}）[/]" if p else "-"
         mcp_ok = [st for st in self.mcp_status if st[1]]
         mcp_line = f"{len(mcp_ok)} 个已连接" if self.mcp_status else "未配置"
+        if mcp_view.connecting(self):
+            mcp_line = f"后台连接中（{len(mcp_view.connecting(self))} 个）"
         mode = a.permissions.mode
         mode_text = "[bold black on yellow] auto 全部不问 [/]" if mode == "auto" else mode
         dev = is_dev()
@@ -1308,6 +1311,9 @@ class Repl:
         if manager is None:
             c.print(f"没有叫 {escape(name)} 的 MCP 服务。")
             return
+        if name in mcp_view.connecting(self):  # 跳过了等待、后台还在连：这时重连会和后台连接撞在一起
+            c.print(f"{escape(name)} 还在后台连接，连好后再试。")
+            return
         if action == "disable":
             for tool_name in manager.disconnect(name):
                 a.tools.pop(tool_name, None)
@@ -1325,6 +1331,40 @@ class Repl:
         entry = next(e for e in manager.status if e[0] == name)
         self._set_mcp_status(*entry)
         self.print_mcp_status([entry])
+
+    def _sync_mcp(self) -> None:
+        """后台连接的 MCP 服务：连完后把工具接进智能体、打印连接结果。只在主线程、用户提交输入时调。
+
+        不在后台线程里直接改 agent.tools：主线程每轮都在遍历它，同时改会出错。还没连完就等（模型这一轮可能要用），
+        等的时候 Ctrl+C 跳过：这一句先不带这些工具，下次输入时再接。
+        """
+        # 按「哪些后台管理器还没接入」判断，不能看状态里有没有「连接中」：服务连得比建界面还快时，
+        # 界面拿到的已经是连好的状态，看状态会以为不用接，工具就永远进不了智能体（测试里实际撞到过）
+        managers = [m for m in self.mcp_managers if m.background and id(m) not in self._mcp_synced]
+        if not managers:
+            return
+        shown_connecting = bool(mcp_view.connecting(self))  # 欢迎页显示的是「连接中」，连完要补打印结果
+        pending = [name for m in managers for name in m.pending()]
+        if pending:
+            self._spin(f"等待 MCP 服务连接（{len(pending)} 个）…", "Ctrl+C 跳过")
+            try:
+                for manager in managers:
+                    while not manager.wait(0.2):  # 分段等：Windows 上一直阻塞在 wait() 里收不到 Ctrl+C
+                        pass
+            except KeyboardInterrupt:
+                self._unspin()
+                self.console.print("[dim]已跳过等待：这一句先不带 MCP 工具，连好后下次输入时接入。[/]")
+                return
+            self._unspin()
+        for manager in managers:
+            for tool in manager.tools:
+                self.agent.tools[tool.name] = tool
+            for entry in manager.status:
+                self._set_mcp_status(*entry)
+            self._mcp_synced.add(id(manager))
+        if shown_connecting:  # 欢迎页已经显示过结果的就不重复打印
+            for line in mcp_view.startup_line(self):
+                self.console.print(line)
 
     def _set_mcp_status(self, name: str, ok: bool, detail: str) -> None:
         for i, (old, _, _) in enumerate(self.mcp_status):
@@ -1524,6 +1564,7 @@ class Repl:
                 continue
             if not self._plain_input:
                 self.echo_user(text)  # 输入框已被擦掉：把这句话留在对话记录里
+            self._sync_mcp()  # 后台连的 MCP 服务：处理这句输入之前接进来（还没连完就等）
             if text.startswith("#") and not text.startswith("#!"):
                 with self._cancellable():
                     self.quick_memory(text)  # # 开头：记进 HENG.md，不发给模型

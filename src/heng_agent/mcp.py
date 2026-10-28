@@ -42,6 +42,8 @@ from heng_agent.tools.shell import IS_WINDOWS, kill_tree
 
 PROTOCOL_VERSION = "2025-06-18"
 MAX_RESULT_CHARS = 30_000
+#: 后台连接时 status 里的占位说明（界面据此显示「连接中」，不当成连接失败）
+CONNECTING = "连接中…"
 
 
 @dataclass(frozen=True)
@@ -375,7 +377,12 @@ class MCPManager:
     单个服务可以断开（/mcp disable）、重连（/mcp reconnect、enable）：崩了或刚更新过的服务不用重启 heng-agent。
     """
 
-    def __init__(self, servers: list[ServerConfig], workdir: Path) -> None:
+    def __init__(self, servers: list[ServerConfig], workdir: Path, *, background: bool = False) -> None:
+        """background=True：在后台线程里连，构造函数立即返回（交互界面用：欢迎页不用等最慢的服务）。
+
+        后台连接时，连完之前 tools / clients 是空的、status 里是「连接中」的占位；连完前不要读写它们，
+        先 wait()——交互界面在用户每次提交输入时做这一步（见 Repl._sync_mcp）。
+        """
         self.workdir = workdir
         self.configs = {s.name: s for s in servers}  # 重连要用原配置
         self.clients: dict[str, _Session] = {}  # 服务名 → 连接
@@ -383,12 +390,40 @@ class MCPManager:
         self.errors: list[str] = []
         #: 每个服务的连接状态：(名字, 是否连上, 工具数与连接方式或失败原因)，欢迎页逐行显示
         self.status: list[tuple[str, bool, str]] = []
+        self._done = threading.Event()
+        self._thread: threading.Thread | None = None
+        #: 是否后台连接：是的话工具要由界面在连完后接进智能体（构造时还没有）
+        self.background = background and bool(servers)
+        if self.background:
+            self.status = [(s.name, False, CONNECTING) for s in servers]  # 占位，连完原地替换，顺序不变
+            self._thread = threading.Thread(target=self._connect_all, args=(servers,), name="mcp-connect", daemon=True)
+            self._thread.start()
+        else:
+            self._connect_all(servers)
+
+    def _connect_all(self, servers: list[ServerConfig]) -> None:
         # 各服务同时连：启动慢的服务（npx 拉起的要好几秒）以前一个接一个排队，6 个服务实测 10 秒，并行后只等最慢的那个。
-        # 线程里只建连接、握手；登记工具与状态回到这里按配置顺序做，工具与欢迎页的顺序不随谁先连上而变
-        with ThreadPoolExecutor(max_workers=max(1, len(servers)), thread_name_prefix="mcp-connect") as pool:
-            opened = list(pool.map(self._open, servers))
-        for config, result in zip(servers, opened, strict=True):
-            self._register(config, result)
+        # 线程里只建连接、握手；登记工具与状态在全部连完后按配置顺序做，工具与欢迎页的顺序不随谁先连上而变
+        try:
+            with ThreadPoolExecutor(max_workers=max(1, len(servers)), thread_name_prefix="mcp-open") as pool:
+                opened = list(pool.map(self._open, servers))
+            for config, result in zip(servers, opened, strict=True):
+                self._register(config, result)
+        finally:
+            self._done.set()
+
+    @property
+    def ready(self) -> bool:
+        """连完了没有（同步连接的一构造完就是 True）。"""
+        return self._done.is_set()
+
+    def pending(self) -> list[str]:
+        """还在后台连接的服务名。"""
+        return [] if self.ready else list(self.configs)
+
+    def wait(self, timeout: float | None = None) -> bool:
+        """等后台连接结束；返回是否已结束。"""
+        return self._done.wait(timeout)
 
     def _set_status(self, name: str, ok: bool, detail: str) -> None:
         """同名的状态原地替换（重连后位置不变），没有就追加。"""
@@ -416,7 +451,7 @@ class MCPManager:
     def _register(
         self, config: ServerConfig, result: tuple[_Session, list[dict[str, Any]]] | AgentError
     ) -> list[MCPTool]:
-        """把一次连接的结果记进工具列表与状态（只在主线程里调）。"""
+        """把一次连接的结果记进工具列表与状态（同一时刻只有一个线程在调：构造时的连接线程，或之后主线程的重连）。"""
         if isinstance(result, AgentError):
             self.errors.append(str(result))
             self._set_status(config.name, False, str(result))
@@ -446,6 +481,9 @@ class MCPManager:
         return removed, self._connect(self.configs[name])
 
     def close(self) -> None:
+        # 后台还在连就先等它连完：否则刚启动的服务进程没人关，变成孤儿进程留在系统里
+        if self._thread is not None:
+            self._thread.join()
         # 各服务同时收尾：Windows 上结束一个 stdio 服务要起一次 taskkill（约 0.5～1 秒），
         # 以前排队关，6 个服务退出要等 5 秒
         clients = list(self.clients.values())

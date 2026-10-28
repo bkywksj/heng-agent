@@ -13,7 +13,7 @@ from rich.markup import escape
 from rich.table import Table
 from rich.text import Text
 
-from heng_agent.mcp import MCPTool
+from heng_agent.mcp import CONNECTING, MCPTool
 
 if TYPE_CHECKING:
     from heng_agent.ui.repl import Repl
@@ -119,14 +119,26 @@ def counts(repl: Repl) -> tuple[int, int, int]:
     连上了但一个工具也没有的也算进去；本会话停用的不算连不上。"""
     ok = [detail for _, good, detail in repl.mcp_status if good]
     tools = sum(int(m.group(1)) for d in ok if (m := re.match(r"(\d+) tools", d)))
-    failed = sum(1 for name, good, _ in repl.mcp_status if not good and name not in repl.mcp_disabled)
+    failed = sum(
+        1
+        for name, good, detail in repl.mcp_status
+        if not good and name not in repl.mcp_disabled and detail != CONNECTING  # 后台还在连的不算连不上
+    )
     return len(ok), tools, failed
+
+
+def connecting(repl: Repl) -> list[str]:
+    """还在后台连接的服务名。"""
+    return [name for name, good, detail in repl.mcp_status if not good and detail == CONNECTING]
 
 
 def startup_line(repl: Repl) -> list[str]:
     """欢迎页的 MCP 状态（rich 标记）：都连上了就一行汇总，不刷屏；连不上的每个单独一行红字写原因。"""
     if not repl.mcp_status:
         return []
+    pending = connecting(repl)
+    if pending:  # 后台连接：欢迎页不等它们；连完后在用户第一次提交输入时再打印这一段
+        return [f"[dim]MCP：{len(pending)} 个服务正在后台连接，可以先输入（发出时还没连好会等一下）[/]"]
     ok, tools, _ = counts(repl)
     lines = []
     if ok:
