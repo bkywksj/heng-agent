@@ -30,7 +30,19 @@ jobs:
         run: |
           uv run ruff format --check src tests
           uv run ruff check src tests
-      - run: uv run python -m pytest -q  # 含 uv.lock、CHANGELOG 与版本号一致的检查（tests/test_version.py）
+      - name: 测试
+        shell: bash
+        timeout-minutes: 15
+        # 含 uv.lock、CHANGELOG 与版本号一致的检查（tests/test_version.py）。失败时和 ci.yml 一样把每个失败的测试写成注释：
+        # 以前这里只有一句 pytest，发 0.4.0 时挂了只看得到「退出码 1」，得下载整份日志才知道是哪个测试
+        run: |
+          set +e
+          uv run python -m pytest -q -rf --junitxml=report.xml 2>&1 | tee pytest.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            uv run python scripts/ci_annotate.py report.xml pytest.log
+          fi
+          exit "$status"
 
   build:
     name: 构建
