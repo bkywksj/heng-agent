@@ -173,3 +173,34 @@ def test_set_mode_rejects_unknown(tmp_path: Path) -> None:
                 await conn.set_session_mode(session_id=session.session_id, mode_id="乱写")
 
     _run(scenario())
+
+
+def test_config_options_model_mode_thinking(tmp_path: Path) -> None:
+    work = tmp_path / "w"
+    work.mkdir()
+    client = RecordingClient()
+    env = _env(tmp_path, [])
+    env.update({"HENG_AGENT_BASE_URL": "https://cc.example.cn", "HENG_AGENT_API_KEY": "sk-x",
+                "HENG_AGENT_MODEL": "claude-sonnet-5"})  # fmt: skip
+
+    async def scenario() -> tuple[Any, Any]:
+        async with acp.spawn_agent_process(client, sys.executable, AGENT, env=env) as (conn, _):
+            await conn.initialize(protocol_version=acp.PROTOCOL_VERSION)
+            session = await conn.new_session(cwd=str(work), mcp_servers=[])
+            sid = session.session_id
+            await conn.set_config_option(config_id="thinking", session_id=sid, value="on")
+            changed = await conn.set_config_option(config_id="model", session_id=sid, value="heng")
+            await conn.set_session_mode(session_id=sid, mode_id="plan")  # 旧接口：也要通知客户端刷新配置项
+            with pytest.raises(acp.RequestError):
+                await conn.set_config_option(config_id="model", session_id=sid, value="没有这个")
+            return session, changed
+
+    session, changed = _run(scenario())
+    options = {o.id: o for o in session.config_options}
+    assert [o.id for o in session.config_options] == ["model", "mode", "thinking"]
+    assert options["model"].category == "model" and options["model"].current_value == "env"  # 环境变量给的是默认
+    assert "env · claude-sonnet-5" in [o.name for o in options["model"].options]
+    after = {o.id: o.current_value for o in changed.config_options}
+    assert after == {"model": "heng", "mode": "ask", "thinking": "on"}
+    updates = [e[1] for e in client.events if e[0] == "update" and e[1].session_update == "config_option_update"]
+    assert updates and {o.id: o.current_value for o in updates[-1].config_options}["mode"] == "plan"

@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import contextlib
+import os
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -34,7 +35,7 @@ from heng_agent.hooks import is_trusted, load_hooks
 from heng_agent.mcp import MCPManager, load_servers
 from heng_agent.mcp import is_trusted as mcp_is_trusted
 from heng_agent.model.client import make_client
-from heng_agent.model.providers import load_profiles
+from heng_agent.model.providers import ENV_PROFILE, load_profiles
 from heng_agent.permissions import Permissions, Rules
 from heng_agent.session import SessionStore
 from heng_agent.tools.base import builtin_tools
@@ -62,6 +63,7 @@ PLAN_STATUS = {"pending": "pending", "in_progress": "in_progress", "done": "comp
 class Session:
     agent: Agent
     manager: MCPManager
+    provider: str = ""  # 当前用的服务商配置档（模型下拉框的当前值）
     notes: list[str] = field(default_factory=list)  # 第一次提问时告诉用户的事（如跳过了没信任的钩子）
 
 
@@ -88,7 +90,7 @@ def build_session(cwd: Path, session_id: str | None = None) -> Session:
                   hooks=user_hooks + (project_hooks if hooks_ok else []))  # fmt: skip
     if session_id:
         agent.resume(store)
-    return Session(agent, manager, notes)
+    return Session(agent, manager, provider=default, notes=notes)
 
 
 def modes_state(current: str) -> schema.SessionModeState:
@@ -96,6 +98,41 @@ def modes_state(current: str) -> schema.SessionModeState:
         current_mode_id=current,
         available_modes=[schema.SessionMode(id=k, name=name, description=desc) for k, (name, desc) in MODES.items()],
     )
+
+
+def usable_profiles(agent: Agent) -> dict[str, Any]:
+    """模型下拉框里列哪些服务商：有密钥（直接写的或环境变量里有）的，加上本机的 heng 与环境变量给的——
+    没配密钥的预设列出来也选不了，只会让人困惑。"""
+    profiles, _ = load_profiles(agent.settings.home, agent.settings.workdir)
+
+    def usable(name: str, p: Any) -> bool:
+        return bool(p.api_key or (p.api_key_env and os.environ.get(p.api_key_env)) or name in ("heng", ENV_PROFILE))
+
+    return {name: p for name, p in profiles.items() if usable(name, p)}
+
+
+def config_options(session: Session) -> list[Any]:
+    """会话配置项（ACP 的标准做法，取代旧的会话模式）：模型、权限模式、思考开关，客户端显示成下拉框。"""
+    agent = session.agent
+    profiles = usable_profiles(agent)
+    if session.provider not in profiles:  # 当前用的总要在列表里
+        every, _ = load_profiles(agent.settings.home, agent.settings.workdir)
+        profiles[session.provider] = every[session.provider]
+    option = schema.SessionConfigSelectOption
+    return [
+        schema.SessionConfigOptionSelect(
+            id="model", name="模型", category="model", type="select", current_value=session.provider,
+            options=[option(value=name, name=f"{name} · {p.model}", description=p.note or None)
+                     for name, p in profiles.items()]),
+        schema.SessionConfigOptionSelect(
+            id="mode", name="权限模式", category="mode", type="select", current_value=agent.permissions.mode,
+            options=[option(value=k, name=name, description=desc) for k, (name, desc) in MODES.items()]),
+        schema.SessionConfigOptionSelect(
+            id="thinking", name="思考", category="thought_level", type="select",
+            current_value="on" if agent.thinking else "off",
+            options=[option(value="off", name="关闭"),
+                     option(value="on", name="开启", description="先思考再回答，更慢但更周全")]),
+    ]  # fmt: skip
 
 
 def tool_title(agent: Agent, name: str, args: dict[str, Any]) -> str:
@@ -168,7 +205,8 @@ class HengAgent(acp.Agent):
         assert session.agent.session is not None
         sid = session.agent.session.id
         self.sessions[sid] = session
-        return schema.NewSessionResponse(session_id=sid, modes=modes_state(session.agent.permissions.mode))
+        return schema.NewSessionResponse(session_id=sid, modes=modes_state(session.agent.permissions.mode),
+                                         config_options=config_options(session))  # fmt: skip
 
     async def load_session(self, cwd: str, session_id: str, mcp_servers: Any = None,
                            **kwargs: Any) -> schema.LoadSessionResponse:  # fmt: skip
@@ -183,7 +221,8 @@ class HengAgent(acp.Agent):
                     update = (acp.update_user_message_text(block["text"]) if message["role"] == "user"
                               else acp.update_agent_message_text(block["text"]))  # fmt: skip
                     await self.conn.session_update(session_id=session_id, update=update)
-        return schema.LoadSessionResponse(modes=modes_state(session.agent.permissions.mode))
+        return schema.LoadSessionResponse(modes=modes_state(session.agent.permissions.mode),
+                                          config_options=config_options(session))  # fmt: skip
 
     async def list_sessions(self, cwd: str | None = None, cursor: str | None = None,
                             **kwargs: Any) -> schema.ListSessionsResponse:  # fmt: skip
@@ -202,7 +241,30 @@ class HengAgent(acp.Agent):
     async def set_session_mode(self, session_id: str, mode_id: str, **kwargs: Any) -> None:
         if mode_id not in MODES:
             raise acp.RequestError.invalid_params({"message": f"没有这个模式：{mode_id}"})
-        self._session(session_id).agent.permissions.mode = mode_id  # type: ignore[assignment]
+        session = self._session(session_id)
+        session.agent.permissions.mode = mode_id  # type: ignore[assignment]
+        update = schema.ConfigOptionUpdate(
+            session_update="config_option_update", config_options=config_options(session)
+        )
+        await self.conn.session_update(session_id=session_id, update=update)  # 模式下拉框与配置项保持一致
+
+    async def set_config_option(self, config_id: str, session_id: str, value: str | bool,
+                                **kwargs: Any) -> schema.SetSessionConfigOptionResponse:  # fmt: skip
+        session = self._session(session_id)
+        agent = session.agent
+        if config_id == "mode" and value in MODES:
+            agent.permissions.mode = value  # type: ignore[assignment]
+        elif config_id == "thinking" and value in ("on", "off"):
+            agent.thinking = value == "on"
+        elif config_id == "model":
+            profiles, _ = load_profiles(agent.settings.home, agent.settings.workdir)
+            if value not in profiles:
+                raise acp.RequestError.invalid_params({"message": f"没有这个服务商：{value}"})
+            agent.client = make_client(profiles[str(value)], agent.settings.max_tokens)
+            session.provider = str(value)
+        else:
+            raise acp.RequestError.invalid_params({"message": f"不认识的配置：{config_id} = {value}"})
+        return schema.SetSessionConfigOptionResponse(config_options=config_options(session))
 
     async def cancel(self, session_id: str, **kwargs: Any) -> None:
         session = self.sessions.get(session_id)

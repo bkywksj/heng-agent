@@ -51,8 +51,8 @@ class Found:
 
 
 def needs_onboarding(home: Path) -> bool:
-    """还没有用户配置文件 = 第一次用。"""
-    return not config_path(home).exists()
+    """还没有用户配置文件 = 第一次用。调用方用环境变量给了服务商（HENG_AGENT_BASE_URL，如智码启动时）就不用引导。"""
+    return not config_path(home).exists() and not os.environ.get("HENG_AGENT_BASE_URL", "").strip()
 
 
 def _claude_env(settings_file: Path) -> dict[str, str]:

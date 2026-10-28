@@ -153,7 +153,8 @@ def _apply_config(path: Path, profiles: dict[str, Profile], default: str, *, pro
 
 
 def load_profiles(home: Path, workdir: Path | None = None) -> tuple[dict[str, Profile], str]:
-    """内置预设 → 用户配置（home/config.json）→ 项目配置（workdir/.heng-agent/config.json），后者覆盖前者。
+    """内置预设 → 用户配置（home/config.json）→ 项目配置（workdir/.heng-agent/config.json），后者覆盖前者；
+    最后是环境变量 HENG_AGENT_BASE_URL 等给的一次性服务商（见 env_profile），有就设为默认。
 
     多实例互不干扰：配置文件只读不写；每个实例的 --provider、/provider 切换都只在自己的内存里。
     """
@@ -165,6 +166,39 @@ def load_profiles(home: Path, workdir: Path | None = None) -> tuple[dict[str, Pr
     for path, project in layers:
         if path.is_file():
             default = _apply_config(path, profiles, default, project=project)
+    from_env = env_profile()
+    if from_env is not None:
+        profiles[ENV_PROFILE], default = from_env, ENV_PROFILE
     if default not in profiles:
         raise AgentError(f"默认配置档「{default}」不存在，可选：{', '.join(profiles)}")
     return profiles, default
+
+
+ENV_PROFILE = "env"
+
+
+def env_profile(environ: dict[str, str] | None = None) -> Profile | None:
+    """调用方（如智码）启动 heng-agent 时用环境变量给的服务商：只在这次运行里用，不写进配置文件。
+
+    设了 HENG_AGENT_BASE_URL 才启用；HENG_AGENT_API_KEY 密钥、HENG_AGENT_MODEL 模型名（必填）、
+    HENG_AGENT_PROTOCOL anthropic（默认）/ openai、HENG_AGENT_AUTH auto（默认）/ x-api-key / bearer。
+
+    用 heng-agent 自己的变量名、不读 ANTHROPIC_BASE_URL 这类：不少人为了别的工具全局设着 ANTHROPIC_API_KEY，
+    一看到就用会悄悄绕开用户在 heng-agent 里配好的默认服务商。专用的名字只在有意设置时生效。
+    """
+    env = os.environ if environ is None else environ
+    base_url = env.get("HENG_AGENT_BASE_URL", "").strip()
+    if not base_url:
+        return None
+    model = env.get("HENG_AGENT_MODEL", "").strip()
+    protocol = env.get("HENG_AGENT_PROTOCOL", "anthropic").strip() or "anthropic"
+    auth = env.get("HENG_AGENT_AUTH", "auto").strip() or "auto"
+    if not model:
+        raise AgentError("设了 HENG_AGENT_BASE_URL 就要同时设 HENG_AGENT_MODEL（用哪个模型）")
+    if protocol not in ("anthropic", "openai"):
+        raise AgentError(f"HENG_AGENT_PROTOCOL 只能是 anthropic 或 openai，现在是「{protocol}」")
+    if auth not in ("auto", "x-api-key", "bearer"):
+        raise AgentError(f"HENG_AGENT_AUTH 只能是 auto、x-api-key 或 bearer，现在是「{auth}」")
+    return Profile(protocol=protocol, base_url=base_url, model=model, auth=auth,  # type: ignore[arg-type]
+                   api_key=env.get("HENG_AGENT_API_KEY", "").strip() or None,
+                   note="环境变量 HENG_AGENT_BASE_URL（这次运行用）")  # fmt: skip
