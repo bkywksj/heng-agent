@@ -58,15 +58,18 @@ from heng_agent.ui.render import (
     _PLAIN,
     ALIASES,
     MAX_THUMBNAILS,
-    REPLY_MARK,
+    PROMPT_BAR,
+    Ticker,
     _stdin_is_terminal,
     autolink,
     brief_result,
     edit_in_editor,
+    elapsed_text,
     file_link,
     linkify,
     split_done,
     tool_label,
+    turn_summary,
 )
 from heng_agent.ui.repl_commands import CommandsMixin
 from heng_agent.ui.repl_mcp import McpMixin
@@ -171,6 +174,8 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin):
         # 确认框里选了「以后都允许」：把规则写进用户配置
         agent.permissions.on_persist = self._persist_rule
         self._plain_input = False  # 输入框用不了时退回普通输入
+        self._turn_started = time.time()  # 当前这一问是什么时候提的：结尾那行写时间与用时
+        self._tool_started = time.time()  # 正在跑的工具什么时候开始的：等待动画计时、结果后面写用时
         # 状态栏要起子进程才拿得到的数据（git 分支、用户的状态栏命令）：后台跑、缓存，跑完重画输入框
         self._bar_git = statusline.Background(on_change=self._refresh_input)
         self._bar_custom = statusline.Background(on_change=self._refresh_input)
@@ -217,16 +222,14 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin):
 
     @staticmethod
     def _reply(text: str, first: bool = True) -> Table:
-        """AI 的一段回复：左边紫色 ✦（只有第一段），右边 Markdown。两栏排版，换行后文字仍然对齐。
+        """AI 的一段回复：不加图标，整段缩进两格（和提问左侧的竖条区分开；工具调用是灰色 ●），换行后文字仍然对齐。
 
-        标记和别处区分开：用户提问是 ❯、工具调用是灰色 ●，AI 回复用 ✦（像 Kimi 的 ✨，但 ✨ 是 emoji、
-        在终端里占两格，不同终端宽度不一，第二行会对不齐；✦ 只占一格）。
-        裸网址转成链接（Windows Terminal 里 Ctrl+点击就能打开）。
+        裸网址转成链接（Windows Terminal 里 Ctrl+点击就能打开）。first 保留给调用方，现在每段画法一样。
         """
         grid = Table.grid(padding=(0, 1))
         grid.add_column(width=1, no_wrap=True)
         grid.add_column(ratio=1)
-        grid.add_row(f"[bold magenta]{REPLY_MARK}[/]" if first else "", Markdown(autolink(text)))
+        grid.add_row("", Markdown(autolink(text)))
         return grid
 
     def _model_label(self) -> str:
@@ -421,16 +424,29 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin):
 
     # ---------- 等待动画 ----------
 
-    def _spin(self, text: str, hint: str = "ESC 中断") -> None:
-        """发出请求、跑工具时显示旋转动画：否则屏幕没动静，分不清是卡住还是在干活。"""
+    def _spin(self, text: str, hint: str = "ESC 中断", started: float | None = None,
+              limit: float | None = None) -> None:  # fmt: skip
+        """发出请求、跑工具时显示旋转动画：否则屏幕没动静，分不清是卡住还是在干活。
+
+        括号里的时间一直在走（见 render.Ticker）：started 不给就从这一问提出时算（等模型时看的是这一问一共等了多久）；
+        跑工具时给工具开始的时刻，limit 是 bash 的超时。
+        """
         if self._live is not None:
             return  # 正在流式输出文字时不叠加动画（rich 同一时间只能有一个实时区域）
-        message = f"[cyan]{escape(text)}[/] [dim]{escape(hint)}[/]"
+        message = Ticker(text, hint, self._turn_started if started is None else started, limit)
         if self._status is None:
             self._status = self.console.status(message, spinner="dots")
             self._status.start()
         else:
             self._status.update(message)
+
+    def _spin_tool(self, name: str, args: dict[str, Any]) -> None:
+        """跑工具时的等待动画：从现在开始计时；前台 bash 带上超时与「Ctrl+B 转后台」。确认框批准后也走这里。"""
+        self._tool_started = time.time()
+        foreground_bash = name == "bash" and not args.get("run_in_background")
+        limit = float(args.get("timeout") or self.agent.settings.bash_timeout) if foreground_bash else None
+        hint = "ESC 中断 · Ctrl+B 转后台" if foreground_bash else "ESC 中断"
+        self._spin(f"{tool_label(name)}…", hint, started=self._tool_started, limit=limit)
 
     def _unspin(self) -> None:
         if self._status is not None:
@@ -488,13 +504,15 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin):
             line = Text.assemble(("● ", "grey50"), (label, "dark_cyan"), (f" {summary}" if summary else "", "grey50"))
             line.truncate(max(20, c.width - 2), overflow="ellipsis")
             c.print(line, no_wrap=True)
-            foreground_bash = event.name == "bash" and not event.input.get("run_in_background")
-            self._spin(f"{label}…", "ESC 中断 · Ctrl+B 转后台" if foreground_bash else "ESC 中断")
+            self._spin_tool(event.name, event.input)
         elif isinstance(event, ToolFinished):
             if event.denied:
                 c.print(Text("  ⎿ 已拒绝", style="yellow"))
             else:
                 lines = brief_result(event.name, event.result.content, event.result.is_error)
+                spent = time.time() - self._tool_started
+                if lines and spent >= 1:  # 跑得久的工具在结果后面写上用了多久
+                    lines[0] += f" · {elapsed_text(spent)}"
                 style = "red" if event.result.is_error else "grey42"
                 for i, text in enumerate(lines):
                     row = Text(("  ⎿ " if i == 0 else "    ") + text, style=style)
@@ -503,9 +521,7 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin):
             self._spin("思考中…")  # 工具结果要交回给模型，接下来又是等模型
         elif isinstance(event, TurnDone):
             self._after_text = False  # 这一问结束了：下一问的第一个工具前不必再换行
-            u = event.usage
-            tokens = f"输入 {u.get('input_tokens', 0)} / 输出 {u.get('output_tokens', 0)} token"
-            c.print(f"\n[dim]（{event.rounds} 轮，{tokens}）[/]")
+            c.print("\n" + turn_summary(event, self._turn_started))
 
     # ---------- 确认 ----------
 
@@ -832,10 +848,11 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin):
         里面指向真实文件的 @引用 与绝对路径渲染成超链接（见 linkify）。"""
         lines = text.splitlines() or [""]
         workdir = self.agent.settings.workdir
-        self.console.print(f"[bold cyan]❯[/] [bold]{linkify(lines[0], workdir)}[/]")
-        for line in lines[1:]:
-            self.console.print(f"  [bold]{linkify(line, workdir)}[/]")
+        for line in lines:  # 每行一根竖条：多行的提问也一眼看得出是一整段
+            # 文字也上色（和竖条同色）：长对话里一眼扫得到哪些是自己问的（用户对照 Kimi 的样子提的）
+            self.console.print(f"[bold cyan]{PROMPT_BAR}[/] [bold cyan]{linkify(line, workdir)}[/]")
         self.console.print()  # 和下面的「思考中」、回复拉开一点，不挤
+        self._turn_started = time.time()  # 这一问从这里开始算用时（每问结尾的那行灰字）
 
     def show_thumbnails(self, pictures: list[str]) -> None:
         """附上的图片在终端里画缩略图（Sixel），最多 3 张。只在支持的终端里画：不支持的会刷一屏乱码。"""

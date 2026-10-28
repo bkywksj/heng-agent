@@ -251,11 +251,12 @@ def test_enter_runs_commands_tab_completes(tmp_path: Path) -> None:
     assert run("/conf|\t|prov|\r", hints) == "/config provider"  # Tab 补全加空格、接着提示参数，选参数后 Enter 执行
 
 
-def test_assistant_reply_has_marker(tmp_path: Path) -> None:
+def test_assistant_reply_is_indented_without_marker(tmp_path: Path) -> None:
+    """回复不加图标、整段缩进两格（提问左侧是竖条，两者一眼分得开）；换行后仍然对齐。"""
     repl, console = _repl(tmp_path)
     console.print(repl._reply("第一段\n\n- 要点"))
-    lines = console.export_text().splitlines()
-    assert lines[0].startswith("✦ 第一段") and any(line.startswith("  ") and "要点" in line for line in lines[1:])
+    lines = [line for line in console.export_text().splitlines() if line.strip()]
+    assert lines[0].rstrip() == "  第一段" and all(line.startswith("  ") for line in lines)  # 表格会补齐行尾空格
 
 
 # ---------- 发送时吸收绝对路径（智码 Ctrl+V 截图、拖入文件、粘贴标记被吞） ----------

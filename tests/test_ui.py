@@ -114,7 +114,8 @@ def test_user_message_is_echoed_with_marker(tmp_path: Path) -> None:
     console = Console(record=True, width=100, force_terminal=False)
     repl = Repl(Agent(Settings(workdir=work, home=tmp_path / "h"), FakeModel([])), console=console)
     repl.echo_user("第一行\n第二行 [不是标记]")
-    assert console.export_text() == "❯ 第一行\n  第二行 [不是标记]\n\n"  # 末尾空一行：和下面的「思考中」拉开
+    # 每行一根竖条：多行的提问也看得出是一整段；末尾空一行，和下面的「思考中」拉开
+    assert console.export_text() == "▌ 第一行\n▌ 第二行 [不是标记]\n\n"
 
 
 def test_attachments_render_as_hyperlinks(tmp_path: Path) -> None:
@@ -176,7 +177,7 @@ def test_long_streamed_reply_prints_each_paragraph_once(tmp_path: Path) -> None:
     text = console.export_text()
     for i in range(30):
         assert text.count(f"第 {i} 段：") == 1, i
-    assert text.count("✦") == 1  # 一条回复只有开头一个 ✦
+    assert "用时" in text and text.count("轮 · 输入") == 1  # 结尾一行时间与用时，只打一次
 
 
 def test_spinner_resumes_after_approval(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -210,3 +211,56 @@ def test_autolink() -> None:
     console = Console(file=buf, force_terminal=True, width=100, legacy_windows=False)
     console.print(Repl._reply("百度地址：https://www.baidu.com"))
     assert "\x1b]8;" in buf.getvalue() and "https://www.baidu.com" in buf.getvalue()  # 渲染成超链接
+
+
+def test_turn_summary_has_time_and_duration(monkeypatch: pytest.MonkeyPatch) -> None:
+    """每问结尾一行灰字：几点提的 · 用了多久 · 几轮 · token（以前没有时间，长对话里分不清哪一问是什么时候的）。"""
+    import datetime as dt
+
+    from heng_agent.core.types import TurnDone
+    from heng_agent.ui import render
+
+    started = dt.datetime(2026, 10, 28, 21, 34, 5).timestamp()
+    monkeypatch.setattr(render.time, "time", lambda: started + 8.14)
+    line = render.turn_summary(TurnDone({"input_tokens": 5682, "output_tokens": 96}, rounds=1), started)
+    assert line == "  [dim]21:34 · 用时 8.1 秒 · 1 轮 · 输入 5.7k / 输出 96[/]"
+    monkeypatch.setattr(render.time, "time", lambda: started + 125)
+    assert "用时 2 分 5 秒" in render.turn_summary(TurnDone({}, rounds=3), started)
+
+
+def test_spinner_text_shows_live_elapsed_time(monkeypatch: pytest.MonkeyPatch) -> None:
+    """等待动画括号里的时间一直在走（以前只写「运行…」，等了一两分钟也看不出来）；bash 带上超时。"""
+    from heng_agent.ui import render
+
+    now = [1000.0]
+    monkeypatch.setattr(render.time, "time", lambda: now[0])
+    ticker = render.Ticker("运行…", "ESC 中断", started=1000.0, limit=120)
+    console = Console(width=80, force_terminal=False)
+
+    def shown() -> str:
+        with console.capture() as cap:
+            console.print(ticker)
+        return cap.get().strip()
+
+    assert shown() == "运行… (0s · 超时 2m 0s) · ESC 中断"
+    now[0] += 62
+    assert shown() == "运行… (1m 2s · 超时 2m 0s) · ESC 中断"  # 同一个对象，重画时现算
+    assert render.elapsed_text(3725) == "1h 2m"
+
+
+def test_slow_tool_result_shows_duration(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from heng_agent.core.types import ToolFinished, ToolResult, ToolStarted
+    from heng_agent.ui import repl as repl_module
+
+    console = Console(record=True, width=100, force_terminal=False)
+    repl = Repl(Agent(Settings(workdir=tmp_path, home=tmp_path / "h"), FakeModel([])), console=console)
+    now = [500.0]
+    monkeypatch.setattr(repl_module.time, "time", lambda: now[0])
+    repl.on_event(ToolStarted("t1", "bash", {"command": "sleep 3"}))
+    now[0] += 3.4
+    repl.on_event(ToolFinished("t1", "bash", ToolResult("完成"), denied=False))
+    repl.on_event(ToolStarted("t2", "bash", {"command": "echo hi"}))
+    repl.on_event(ToolFinished("t2", "bash", ToolResult("hi"), denied=False))  # 不到 1 秒：不写用时
+    repl._unspin()
+    text = console.export_text()
+    assert "· 3s" in text and text.count("· 3s") == 1

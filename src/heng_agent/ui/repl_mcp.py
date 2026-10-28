@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import time
+
 from rich.markup import escape
 from rich.panel import Panel
 
@@ -140,7 +142,7 @@ class McpMixin:
         if pending and not wait:  # 显示输入框之前顺手接一下：还没连完就不等，交给状态栏显示进度
             return
         if pending:
-            self._spin(f"等待 MCP 服务连接（{len(pending)} 个）…", "Ctrl+C 跳过")
+            self._spin(f"等待 MCP 服务连接（{len(pending)} 个）…", "Ctrl+C 跳过", started=time.time())
             try:
                 for manager in managers:
                     while not manager.wait(0.2):  # 分段等：Windows 上一直阻塞在 wait() 里收不到 Ctrl+C

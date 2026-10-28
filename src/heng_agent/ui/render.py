@@ -2,22 +2,28 @@
 
 from __future__ import annotations
 
+import datetime as _dt
 import json
 import os
 import re
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
 from rich.markup import escape
 
 from heng_agent.attachments import ABS_PATH, PATH_STOP
+from heng_agent.core.types import TurnDone
 from heng_agent.tools.base import Tool
+from heng_agent.ui.prompt import human_tokens
 
 #: 别名：Claude Code 用户习惯的叫法也认
 ALIASES = {"/cost": "/usage", "/todos": "/todo", "/version": "/status", "/quit": "/exit", "/bashes": "/tasks"}
 RESULT_PREVIEW_LINES = 3  # 命令输出、出错等只留前几行：工具过程要紧凑
-REPLY_MARK = "✦"  # AI 回复的标记（用户提问 ❯、工具调用 ●，三者一眼分得开）
+#: 用户提问左侧的竖条（每行一根，像引用块）。以前提问是 ❯、回复是 ✦，两个小图标在长对话里不好分（用户反馈），
+#: 改成提问一根青色竖条、回复不加图标、每问结尾一行灰字写时间与用时
+PROMPT_BAR = "▌"
 MIN_THINKING_BUDGET = 1024  # Anthropic 要求的思考预算下限
 MAX_THUMBNAILS = 3
 #: 工具调用显示成好读的动词（MCP 工具见 tool_label）
@@ -193,3 +199,46 @@ def linkify(text: str, workdir: Path) -> str:
         last = m.end()
     out.append(escape(text[last:]))
     return "".join(out)
+
+
+def turn_summary(event: TurnDone, started: float) -> str:
+    """每问结尾的一行灰字（rich 标记）：几点提的 · 用了多久 · 几轮 · token。
+
+    以前只写「（1 轮，输入 5682 / 输出 96 token）」：没有时间，长对话里分不清哪一问是什么时候的（用户反馈）。
+    """
+    u = event.usage
+    spent = max(time.time() - started, 0.0)
+    took = f"{spent:.1f} 秒" if spent < 60 else f"{int(spent // 60)} 分 {int(spent % 60)} 秒"
+    tokens = f"输入 {human_tokens(u.get('input_tokens', 0))} / 输出 {human_tokens(u.get('output_tokens', 0))}"
+    when = _dt.datetime.fromtimestamp(started).strftime("%H:%M")
+    return f"  [dim]{when} · 用时 {took} · {event.rounds} 轮 · {tokens}[/]"
+
+
+def elapsed_text(seconds: float) -> str:
+    """时长写成 8s、1m 2s、1h 3m（等待动画、工具用时用）。"""
+    seconds = max(int(seconds), 0)
+    if seconds < 60:
+        return f"{seconds}s"
+    if seconds < 3600:
+        return f"{seconds // 60}m {seconds % 60}s"
+    return f"{seconds // 3600}h {seconds % 3600 // 60}m"
+
+
+class Ticker:
+    """等待动画里的文字：每次重画时现算已经等了多久，括号里的时间一直在走。
+
+    以前只写「思考中…」「运行…」：等了一两分钟屏幕上看不出来，分不清是卡住了还是在干活（用户对照 Claude Code
+    的「Running… (1m 2s · timeout 10m)」提的）。rich 的等待动画每秒重画十几次，每次都会调 __rich__。
+    """
+
+    def __init__(self, text: str, hint: str, started: float, limit: float | None = None) -> None:
+        self.text, self.hint, self.started, self.limit = text, hint, started, limit
+
+    def __rich__(self) -> Any:
+        from rich.text import Text
+
+        timing = elapsed_text(time.time() - self.started)
+        if self.limit:
+            timing += f" · 超时 {elapsed_text(self.limit)}"
+        hint = f" · {escape(self.hint)}" if self.hint else ""
+        return Text.from_markup(f"[cyan]{escape(self.text)}[/] [dim]({timing}){hint}[/]")

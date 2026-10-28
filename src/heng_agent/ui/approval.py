@@ -37,8 +37,7 @@ class ApprovalMixin:
         """
         answer = self._ask_approval(tool, args)
         if answer != "deny":
-            foreground_bash = tool.name == "bash" and not args.get("run_in_background")
-            self._spin(f"{tool_label(tool.name)}…", "ESC 中断 · Ctrl+B 转后台" if foreground_bash else "ESC 中断")
+            self._spin_tool(tool.name, args)  # 计时从批准后开始：等你确认的时间不算工具的
         return answer
 
     def _ask_plan(self, args: dict[str, Any]) -> str:
