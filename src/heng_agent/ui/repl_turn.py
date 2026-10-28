@@ -189,7 +189,7 @@ class TurnMixin:
         with self._queue_lock:
             said = [q for q in self._queued if q.lstrip()[:1] not in ("/", "!", "#")]  # type: ignore[attr-defined]
             self._queued[:] = [q for q in self._queued if q not in said]  # type: ignore[attr-defined]
-        return said
+        return said + self._take_notices()  # type: ignore[attr-defined]  # 做完的后台子智能体：结论也插进来
 
     def _take_queued(self) -> list[str]:
         """输入框里按 ↑：排着队的全部取回来改（界面线程调）。"""

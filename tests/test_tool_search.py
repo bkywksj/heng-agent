@@ -74,3 +74,15 @@ def test_select_and_modes(tmp_path: Path) -> None:
     out = tool.run({"query": "select:mcp__reeve__deploy_project, mcp__nope"}, None)  # type: ignore[arg-type]
     assert "已加载 1 个" in out.content and "没有这些工具：mcp__nope" in out.content
     assert "mcp__reeve__deploy_project" in _names(agent.tool_specs())
+
+
+def test_big_context_window_still_defers_big_mcp_sets(tmp_path: Path) -> None:
+    """上下文 1M 时比例最多按 200k 算：以前 10% 就是 10 万 token，361 个工具的声明刚好不到，每次请求都全带上
+    （真实终端里上下文一开始就是 147k）。"""
+    tools = [FakeMCP("sigil", f"tool_{i}", "很长的说明" * 600) for i in range(30)]  # 约 9 万字符、3 万 token 的声明
+    for window, deferred in ((1_000_000, True), (200_000, True), (2_000_000, True)):
+        settings = Settings(workdir=tmp_path, home=tmp_path / "h", context_window=window)
+        assert Agent(settings, FakeModel([]), tools=[*builtin_tools(), *tools]).defer_mcp() is deferred
+    small = [FakeMCP("calc", "add", "加法")]
+    settings = Settings(workdir=tmp_path, home=tmp_path / "h", context_window=1_000_000)
+    assert not Agent(settings, FakeModel([]), tools=[*builtin_tools(), *small]).defer_mcp()

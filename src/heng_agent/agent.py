@@ -46,7 +46,7 @@ from heng_agent.tools.plan import APPROVED_MODE
 from heng_agent.tools.plan import NAME as EXIT_PLAN
 from heng_agent.tools.shell import clip
 from heng_agent.tools.skill import SkillTool, discover_skills
-from heng_agent.tools.subagent import SubAgentTool
+from heng_agent.tools.subagent import SubAgentTool, SubRun, SubRuns
 from heng_agent.tools.tool_search import ToolSearchTool
 
 MAX_PARALLEL_SUBAGENTS = 4
@@ -56,6 +56,7 @@ MAX_EMPTY_RETRIES = 1  # 模型返回空回复时自动重新请求几次
 SHRINK_TOOL_RESULT = 8000  # 补救时把超过这么多字的工具结果截短到这么长
 SHRINK_MARK = "\n（上下文超限，这段工具结果被截短了）"
 MCP_DEFER_RATIO = 0.1  # MCP 工具声明超过上下文的这个比例就按需加载
+MCP_DEFER_BASE_CAP = 200_000  # 上面的比例最多按这么长的上下文算（见 defer_mcp）
 CHARS_PER_TOKEN = 3  # 粗估：工具声明多是 JSON 与英文，约 3 字符一个 token
 #: 用量记哪几项：缓存读 / 写单独记，计价倍数不同（见 Profile.cost）
 USAGE_KEYS = ("input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens")
@@ -86,12 +87,16 @@ class Agent:
             if subagents
             else {}
         )
+        #: 派出过的子智能体（界面的子智能体面板、查看用）
+        self.subruns = SubRuns()
+        #: 后台子智能体做完时通知谁（交互界面设；没设时 run_in_background 照旧在前台跑完）
+        self.background_notify: Callable[[SubRun], None] | None = None
         #: 当前这一问的确认对话：带改文件工具的子智能体要通过它问用户
         self._approve: Approver | None = None
         if self.skills and not any(t.name == "skill" for t in tool_list):
             tool_list.append(SkillTool(self.skills))
         if subagents and not any(t.name == "task" for t in tool_list):
-            tool_list.append(SubAgentTool(self._spawn_subagent, self._add_usage, self.agent_defs))
+            tool_list.append(self.task_tool())
         #: MCP 工具按需加载：已经搜到并加载的 MCP 工具名（按加载顺序，顺序固定才不会反复打破提示缓存）
         self.loaded_mcp: list[str] = []
         if subagents:
@@ -168,7 +173,12 @@ class Agent:
         return {"session_id": session.id if session else "", "transcript_path": str(session.path) if session else "",
                 "permission_mode": self.permissions.mode}  # fmt: skip
 
-    def _spawn_subagent(self, role: AgentDef | None = None) -> tuple[Agent, Approver]:
+    def task_tool(self) -> SubAgentTool:
+        """派子智能体的工具（/agents 新建角色后重建它，好把新角色写进说明）。"""
+        return SubAgentTool(self._spawn_subagent, self._add_usage, self.agent_defs, runs=self.subruns,
+                            notify=lambda: self.background_notify)  # fmt: skip
+
+    def _spawn_subagent(self, role: AgentDef | None = None, own_cancel: bool = False) -> tuple[Agent, Approver]:
         """子智能体：同一模型客户端、不存会话、不能再派子智能体。返回 (子 Agent, 它用的确认对话)。
 
         - 通用调研员 / 只读角色：只读工具、plan 权限，不问用户（可以并行）；
@@ -183,7 +193,8 @@ class Agent:
             permissions = Permissions("plan", self.permissions.rules)
             sub = Agent(settings.model_copy(update={"permission_mode": "plan"}), self.client, tools=tools,
                         permissions=permissions, subagents=False)  # fmt: skip
-            self._share_cancel(sub)
+            if not own_cancel:  # 后台的有自己的取消标志：主对话按 ESC 不会把它一起停掉
+                self._share_cancel(sub)
             return sub, lambda tool, args: "deny"
         tools = [t for t in builtin_tools() if t.name in role.tools]
         permissions = Permissions(self.permissions.mode, self.permissions.rules)
@@ -239,7 +250,9 @@ class Agent:
         if mode == "on":
             return True
         chars = len(json.dumps([t.spec() for t in mcp], ensure_ascii=False))
-        return chars / CHARS_PER_TOKEN > MCP_DEFER_RATIO * self.context_window
+        # 按上下文长度算比例，但最多按 200k 算：上下文是 1M 时 10% 就是 10 万 token，361 个工具的声明（约 10 万）
+        # 刚好不到，每次请求都全带上——真实终端里看到上下文一开始就是 147k（以前 128k 时按需加载，只有 17k）
+        return chars / CHARS_PER_TOKEN > MCP_DEFER_RATIO * min(self.context_window, MCP_DEFER_BASE_CAP)
 
     def tool_specs(self) -> list[dict[str, Any]]:
         """这一轮发给模型的工具声明。

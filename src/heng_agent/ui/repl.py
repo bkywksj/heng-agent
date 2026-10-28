@@ -59,7 +59,7 @@ from heng_agent.ui import info, mcp_view, statusline
 from heng_agent.ui.approval import ApprovalMixin
 from heng_agent.ui.config_cmd import ConfigCommand
 from heng_agent.ui.doctor import run_checks
-from heng_agent.ui.inputbox import InputBox
+from heng_agent.ui.inputbox import InputBox, TurnSignal
 from heng_agent.ui.keywatch import EscWatcher
 from heng_agent.ui.prompt import MODE_LABEL, MODES, STYLE, SlashCompleter, toolbar
 from heng_agent.ui.render import (
@@ -85,6 +85,7 @@ from heng_agent.ui.repl_commands import CommandsMixin
 from heng_agent.ui.repl_mcp import McpMixin
 from heng_agent.ui.repl_memory import MemoryMixin
 from heng_agent.ui.repl_session import SessionMixin
+from heng_agent.ui.repl_subagents import NOTICE_PREFIX, SubagentsMixin, notice_line
 from heng_agent.ui.repl_turn import TurnMixin
 from heng_agent.ui.select import Option, ask_line, choose
 from heng_agent.ui.session_tools import (
@@ -142,7 +143,7 @@ HELP = """查看状态
   空输入框里连按两次 Ctrl+C 退出"""
 
 
-class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin, TurnMixin):
+class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin, TurnMixin, SubagentsMixin):
     #: 内置命令：同名的自定义命令不生效
     BUILTIN = frozenset({"help", "clear", "mode", "model", "provider", "compact", "undo", "todo", "cost", "skills",
                          "mcp", "config", "rewind", "resume", "rename", "permissions", "copy", "export",
@@ -186,6 +187,7 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin, Tu
         self._plain_input = False  # 输入框用不了时退回普通输入
         self._queued: list[str] = []  # 回答中敲下 Enter 的话：这一问结束后按顺序发出（见 repl_turn）
         self._btw_log: list[tuple[str, str]] = []  # 问过的旁支问题与回答（/btw 带上它们，只在内存里）
+        self._setup_subagents()  # 子智能体面板、后台子智能体做完时的通知（见 repl_subagents）
         self._turn_live_render: Any = None  # 回答中：还没写完的那段回复，画在输入框上方（见 repl_turn）
         self._turn_activity: Any = None  # 回答中：转圈旁边的文字
         self._turn_started = time.time()  # 当前这一问是什么时候提的：结尾那行写时间与用时
@@ -392,6 +394,8 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin, Tu
                         on_ctrl_v=lambda: paste_clipboard(self.agent.settings.workdir, text_fallback=True),
                         on_editor=edit_in_editor,
                         todos=lambda: render_todos(self.agent.ctx.todos) if self.agent.ctx.todos else "",
+                        agents=self._agent_rows,
+                        on_view_agent=self.view_subagent,
                     )
                 prefill, self._prefill = self._prefill, ""
                 return self._box.prompt(default=prefill)
@@ -548,7 +552,11 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin, Tu
             return
         self._end_text()
         self._unspin()
-        if isinstance(event, UserInterjection):  # 回答中插的话已经交给模型：照提问的样子显示在它该在的位置
+        if isinstance(event, UserInterjection) and event.text.startswith(NOTICE_PREFIX):
+            self._gap()  # 后台子智能体做完、结论插进了这一问：一行提示，不当成你说的话
+            c.print(notice_line(event.text))
+            self._spin("思考中…")
+        elif isinstance(event, UserInterjection):  # 回答中插的话已经交给模型：照提问的样子显示在它该在的位置
             self.echo_user(event.text, restart_timer=False)  # echo_user 自己会先空一行
             self._spin("思考中…")
         elif isinstance(event, Notice):
@@ -897,6 +905,10 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin, Tu
             self.console.rule(style="grey35")
             self.console.print(f"[dim]{a.permissions.mode} · {escape(self._model_label())} · 上下文 {pct:.0f}%[/]")
         line = self._input("> ")
+        if isinstance(line, TurnSignal):
+            # 后台子智能体做完、把空闲的输入框叫醒了：原样交给主循环（它发起一问）。以前这里直接 .strip()，
+            # 程序当场退出（真实终端里实测：后台子智能体一做完窗口就回到了 PowerShell）
+            return line  # type: ignore[return-value]
         while self._plain_input and line.endswith("\\"):  # 普通输入里用行尾 \ 续行；输入框里直接 Ctrl+J
             line = line[:-1] + "\n" + self._input("… ")
         return line.strip()
@@ -1018,16 +1030,28 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin, Tu
             self._refresh_bar()
             try:
                 # 回答中排进队列的话：这一问结束后按顺序发出，像刚输入的一样（会显示在对话里）
-                text = self._queued.pop(0) if self._queued else self.read()
+                notices = self._take_notices()
+                text = "\n\n".join(notices) if notices else self._queued.pop(0) if self._queued else self.read()
             except (EOFError, KeyboardInterrupt):
                 return 0
+            if isinstance(text, TurnSignal):  # 后台子智能体做完、把空闲的输入框叫醒了：框里的字留着，下一圈发起一问
+                self._prefill = text.draft
+                continue
             if not text:
                 continue
-            if not self._plain_input:
+            if notices:  # 自动发起的一问：每个子智能体一行提示，不当成你说的话
+                self._gap()
+                for notice in notices:
+                    self.console.print(notice_line(notice))
+                self.console.print()
+                self._block_start = True
+                self._turn_started = time.time()
+            elif not self._plain_input:
                 self.echo_user(text)  # 输入框已被擦掉：把这句话留在对话记录里
             # 后台连的 MCP 服务：发给模型的话要等它们连好（模型这一轮可能要用）；# 记忆与内置命令在本地处理、
             # 用不上 MCP，不等——以前 /effort 这类命令也要等十几秒（真实终端里实测）
             local = text.startswith("#") or (text.startswith("/") and text[1:].split(" ", 1)[0] in self.BUILTIN)
+            local = local and not notices
             self._sync_mcp(wait=not local)
             if text.startswith("#") and not text.startswith("#!"):
                 with self._cancellable():

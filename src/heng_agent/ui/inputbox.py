@@ -140,11 +140,14 @@ class InputBox:
         on_ctrl_v: Callable[[], tuple[str, str]] | None = None,
         on_editor: Callable[[str], str | None] | None = None,
         todos: Callable[[], str] | None = None,
+        agents: Callable[[], list[tuple[int, str]]] | None = None,
+        on_view_agent: Callable[[int], None] | None = None,
     ) -> None:
         """on_paste：粘贴的文字是文件路径时返回替换文字（拖入文件就是这样），否则 None；
         on_clipboard：Alt+V 时调用，返回 (要插入的文字, 显示在状态栏下的说明)；
         on_ctrl_v：Ctrl+V 时调用（同上，另带文字兜底）。Windows Terminal 会自己处理 Ctrl+V，到不了这里；
-        把 Ctrl+V 交给程序的终端里它就能直接粘截图。"""
+        把 Ctrl+V 交给程序的终端里它就能直接粘截图。
+        agents：正在跑的子智能体 [(编号, 一行说明)]，有就在状态栏下面画面板；on_view_agent：选中一个按 Enter。"""
         self.history = history
         self.completer = merge_completers([commands, PathCompleter(workdir)])
         self.toolbar = toolbar
@@ -156,6 +159,10 @@ class InputBox:
         self.on_editor = on_editor  # Ctrl+G：用外部编辑器写长消息，返回改好的文字（None = 没改）
         self.todos = todos  # 当前任务清单的文字（空 = 没有），显示在输入框上方
         self.show_todos = True  # Ctrl+T 切换
+        self.agents = agents or (lambda: [])
+        self.on_view_agent = on_view_agent
+        #: 子智能体面板里选中的那一行（None = 没在选；在输入框最后一行按 ↓ 进入，见 _bindings）
+        self.agent_pick: int | None = None
         self.flash = ""  # 一次性提示（如「已粘贴图片」），显示在状态栏下面
         self._last_ctrl_c = -1e9  # 空框里上一次按 Ctrl+C 的时间（连按两次才退出）
         self._last_esc = -1e9  # 上一次按 ESC 的时间（空框里双击 ESC 回退）
@@ -232,6 +239,39 @@ class InputBox:
                 text = "\n".join(taken) + ("\n" + buffer.text if buffer.text else "")
                 buffer.document = Document(text, len(text))
 
+        picking = Condition(lambda: self.agent_pick is not None)
+
+        def at_bottom() -> bool:
+            # 光标在最后一行、而且不在翻历史（翻到一半时 ↓ 是回到更新的历史）
+            doc = buffer.document
+            return (
+                doc.cursor_position_row == doc.line_count - 1 and buffer.working_index == len(buffer._working_lines) - 1
+            )
+
+        @kb.add("down", filter=~picking & Condition(lambda: bool(self.agents()) and at_bottom()))
+        def _enter_agents(event: KeyPressEvent) -> None:
+            self.agent_pick = 0  # 进入子智能体面板，选中第一个（照 Claude Code：↓ 选子智能体）
+
+        @kb.add("down", filter=picking)
+        def _agent_next(event: KeyPressEvent) -> None:
+            rows = self.agents()
+            self.agent_pick = min((self.agent_pick or 0) + 1, max(len(rows) - 1, 0))
+
+        @kb.add("up", filter=picking)
+        def _agent_prev(event: KeyPressEvent) -> None:
+            self.agent_pick = None if not self.agent_pick else self.agent_pick - 1  # 第一行再按 ↑ 回到输入框
+
+        @kb.add("enter", filter=picking)
+        def _agent_view(event: KeyPressEvent) -> None:
+            rows = self.agents()
+            if rows and self.on_view_agent is not None:
+                self.on_view_agent(rows[min(self.agent_pick or 0, len(rows) - 1)][0])
+            self.agent_pick = None
+
+        @kb.add("escape", filter=picking, eager=True)
+        def _agent_leave(event: KeyPressEvent) -> None:
+            self.agent_pick = None
+
         @kb.add("c-b", filter=Condition(lambda: self.turn is not None))
         def _detach(event: KeyPressEvent) -> None:
             if self.turn is not None:
@@ -261,7 +301,8 @@ class InputBox:
                 self._last_ctrl_c = now
                 self.flash = "再按一次 Ctrl+C 退出"
 
-        @kb.add("escape", filter=~is_searching)  # 不用 eager（Alt+V、方向键都以 ESC 开头）；搜索中的 ESC 是取消搜索
+        # 不用 eager（Alt+V、方向键都以 ESC 开头）；搜索中的 ESC 是取消搜索；在子智能体面板里选的时候 ESC 是退出选择
+        @kb.add("escape", filter=~is_searching & ~picking)
         def _escape(event: KeyPressEvent) -> None:
             now = time.monotonic()
             if self.turn is not None:  # 回答中：打断这一问；框里的草稿留着不发，排队的话接着发（同 Claude Code）
@@ -282,7 +323,7 @@ class InputBox:
             else:
                 self.flash = "再按一次 ESC 回退到之前的某一问"
 
-        @kb.add("escape", "escape", filter=~is_searching)
+        @kb.add("escape", "escape", filter=~is_searching & ~picking)
         def _double_escape(event: KeyPressEvent) -> None:
             # 两下 ESC 隔得比 KEY_SEQUENCE_TIMEOUT 还近时，prompt_toolkit 把它们当成一个「ESC ESC」组合键，
             # 没有绑定的话两下都被丢掉——快速双击什么也不发生（真实终端里实测）。按「刚按过一下」处理第二下
@@ -436,12 +477,31 @@ class InputBox:
             Window(FormattedTextControl(lambda: [("class:flash", f" {self.flash}")]), height=1),
             filter=Condition(lambda: bool(self.flash)),
         )
+
+        def agents_text() -> list[tuple[str, str]]:
+            rows = self.agents()
+            if not rows:
+                self.agent_pick = None  # 都做完了：退出选择
+                return []
+            pick = self.agent_pick
+            hint = "  ↑↓ 选择 · Enter 查看 · ESC 返回" if pick is not None else "  ↓ 选中查看"
+            out: list[tuple[str, str]] = [("", "\n"), ("class:agents.main", " ● main"), ("class:agents.hint", hint)]
+            for i, (_, line) in enumerate(rows):
+                style = "class:agents.pick" if pick is not None and i == min(pick, len(rows) - 1) else "class:agents"
+                out += [("", "\n"), (style, f" {'❯' if style.endswith('pick') else '○'} {line}")]
+            return out
+
+        agents = ConditionalContainer(
+            Window(FormattedTextControl(agents_text), dont_extend_height=True),
+            filter=Condition(lambda: bool(self.agents())),
+        )
         # 补全菜单弹出时在下方留出空间：输入框只有一行高，不留的话菜单会被截掉（PromptSession 也是这么做的）
         menu_space = ConditionalContainer(Window(height=Dimension.exact(MENU_ROWS)), filter=has_completions)
         root = FloatContainer(
             # 顶部对齐：光标下方多出来的空间留在最下面，不分给输入框
             content=HSplit(
-                [live, queued, gap, todo_box, frame, search, status, flash, menu_space], align=VerticalAlign.TOP
+                [live, queued, gap, todo_box, frame, search, status, agents, flash, menu_space],
+                align=VerticalAlign.TOP,
             ),
             floats=[Float(xcursor=True, ycursor=True, content=CompletionsMenu(max_height=MENU_ROWS, scroll_offset=1))],
         )
@@ -522,9 +582,11 @@ class InputBox:
         # 另一个等待：有 Alt+V、Alt+Enter 这些「ESC 开头」的组合键绑定时，单独的 ESC 还要再等 timeoutlen（默认 1 秒）
         # 看后面跟不跟键——两次 ESC 各被拖近 1 秒，间隔超出双击窗口，双击 ESC 就认不出来（实测卡住）
         app.timeoutlen = KEY_SEQUENCE_TIMEOUT
-        if self.turn is not None:
-            app.refresh_interval = 0.1  # 计时、转圈、流式文字要动起来
+        # 计时、转圈、流式文字要动起来；平时有后台子智能体在跑时面板上的用时也要动
+        app.refresh_interval = 0.1 if self.turn is not None else 0.5
         self._buffer = buffer
+        self.agent_pick = None
+        buffer.on_text_changed += lambda _: setattr(self, "agent_pick", None)  # 接着打字：退出面板选择
         # 历史是异步加载的：PromptSession 会自己触发，这里手搭的 Application 要主动做，否则上箭头取不到历史
         self.app = app
         try:

@@ -22,7 +22,6 @@ from heng_agent.model.client import make_client
 from heng_agent.model.thinking import EFFORT_NAME, EFFORTS
 from heng_agent.model.thinking import describe as describe_thinking
 from heng_agent.tools.background import describe
-from heng_agent.tools.subagent import SubAgentTool
 from heng_agent.ui import agents_view, btw, terminal_setup
 from heng_agent.ui.doctor import report as doctor_report
 from heng_agent.ui.render import (
@@ -151,7 +150,7 @@ class CommandsMixin:
         a = self.agent
         a.agent_defs = discover_agents(a.settings.home, a.settings.workdir, claude_user=a.settings.claude_user_config)
         if "task" in a.tools:
-            a.tools["task"] = SubAgentTool(a._spawn_subagent, a._add_usage, a.agent_defs)
+            a.tools["task"] = a.task_tool()
 
     def think_command(self, rest: str) -> None:
         """/think 切换思考模式；/think on|off；/think 16000 设预算并打开；/think show 看最近一次思考。"""
