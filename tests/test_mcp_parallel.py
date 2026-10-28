@@ -135,8 +135,10 @@ def test_repl_banner_then_sync_on_first_input(tmp_path: Path, gate: threading.Ev
     repl._sync_mcp()  # 用户提交第一句：等后台连完，再把工具接进智能体
     repl._sync_mcp()  # 之后再提交：已经接过，什么都不做
     text = console.export_text()
-    banner, after = text.split("个服务正在后台连接", 1)
+    assert "正在后台连接" not in text  # 状态栏已经显示连接进度：开头不再单独写一行
+    banner, after = text.split("MCP 服务 ", 1)  # 连完后才打印每个服务一行
     assert "后台连接中（3 个）" in banner and "连接失败" not in banner  # 连接中不能当成失败标红
+    after = "MCP 服务 " + after
     assert after.count("MCP：2 个服务已连接 · 2 个工具") == 1  # 连完打印一次汇总
     assert 'MCP 服务 "third" 连接失败：third 起不来' in after and 'MCP 服务 "first" 已连接' in after
     assert {"mcp__first__first_tool", "mcp__second__second_tool"} <= set(repl.agent.tools)

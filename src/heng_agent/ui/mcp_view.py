@@ -172,8 +172,10 @@ def startup_line(repl: Repl) -> list[str]:
     if not repl.mcp_status:
         return []
     pending = connecting(repl)
-    if pending:  # 后台连接：欢迎页不等它们；连完后（输入框出现前或提交输入时）再打印这一段
-        return [f"[dim]MCP：{len(pending)} 个服务正在后台连接，可以先输入（发出时还没连好会等一下）[/]"]
+    if pending:
+        # 后台连接：欢迎页不等它们，也不再单独打一行「正在后台连接」——底部状态栏已经实时显示「⠹ MCP 4」，
+        # 再写一行重复了（用户反馈）。连完后（输入框出现前或提交输入时）打印每个服务一行的结果
+        return []
     lines = []
     for name, good, detail in repl.mcp_status:
         if name in repl.mcp_disabled:
