@@ -61,7 +61,7 @@ def test_mode_line_per_mode_and_reminders() -> None:
 
 def test_icons_are_single_width() -> None:
     """emoji 在有的终端里算两格、有的算一格，对不齐；状态栏只用单宽字符。"""
-    for ch in "▣│⏵‖█░✓✗✻":
+    for ch in "▣|⏵‖█░✓✗✻":
         assert cell_len(ch) == 1, ch
 
 

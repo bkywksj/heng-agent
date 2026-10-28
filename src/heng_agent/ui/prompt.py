@@ -162,7 +162,8 @@ MODE_ICON = {"ask": "⏵", "accept-edits": "⏵⏵", "plan": "‖", "auto": "⏵
 MODE_STYLE = {"ask": "class:bar.mode", "accept-edits": "class:bar.mode-edits", "plan": "class:bar.mode-plan",
               "auto": "class:bar.mode-auto"}  # fmt: skip
 CTX_CELLS = 8  # 上下文进度条的格数
-SEP = ("class:bar.sep", " │ ")
+#: 分隔符用普通的 |：制表符 │ 在 Windows Terminal 里撑满整格高度，上下连成长竖线（用户反馈太长），Claude Code 也用 |
+SEP = ("class:bar.sep", " | ")
 
 
 def context_bar(used: int, window: int, threshold: float) -> tuple[str, str]:
