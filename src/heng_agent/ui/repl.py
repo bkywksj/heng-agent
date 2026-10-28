@@ -73,6 +73,7 @@ from heng_agent.ui.session_tools import (
 )
 from heng_agent.ui.sixel import encode as sixel_encode
 from heng_agent.ui.sixel import supports_sixel
+from heng_agent.updates import cached_newer_version, check_in_background
 
 HELP = """查看状态
   /status                     一屏看全当前状态：版本、模型、会话、目录、权限、MCP、说明文件、扩展（/version 同）
@@ -923,6 +924,13 @@ class Repl:
         )
         for line in mcp_view.startup_line(self):  # 都连上了只一行汇总；连不上的才逐个红字列出
             self.console.print(line)
+        if self.agent.settings.update_check and not is_dev():
+            # 只读上一次查到的结果（不等网络），再在后台查下一次：有新版本下次启动就能提示
+            newer = cached_newer_version(self.agent.settings.home)
+            if newer:
+                tip = f"有新版本 {escape(newer)}（当前 {escape(version_label())}）：退出后运行 heng-agent upgrade"
+                self.console.print(f"[yellow]{tip}[/]")
+            check_in_background(self.agent.settings.home)
         compat = self.compat_items()
         if compat:
             self.console.print(f"[dim]兼容加载：{escape('、'.join(compat))}[/]")

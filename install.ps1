@@ -59,6 +59,13 @@ if ($env:HENG_AGENT_INDEX) {
 }
 
 # 3. 装或升级（--force：已装过就覆盖成最新版）
+# Windows 上 heng-agent 运行时文件被占用：硬装会失败一半、把安装弄坏（之后一启动就 ModuleNotFoundError）。先让用户关掉
+$Running = @(Get-Process -Name 'heng-agent' -ErrorAction SilentlyContinue)
+if ($Running.Count -gt 0) {
+    Say "还有 $($Running.Count) 个 heng-agent 在运行（进程号 $(($Running | ForEach-Object Id) -join ', ')）：先关掉它们再运行本脚本。" 'Yellow'
+    Say "（程序运行时文件被占用，这时安装会失败，还会把已有的安装弄坏）" 'Yellow'
+    exit 1
+}
 Say "· 安装 $Spec ……"
 & uv tool install --force @IndexArgs $Spec
 if ($LASTEXITCODE -ne 0) {

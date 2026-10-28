@@ -20,7 +20,7 @@ from heng_agent.context import expand_mentions, mention_images
 from heng_agent.core.config import Settings
 from heng_agent.core.errors import AgentError
 from heng_agent.core.types import AgentEvent, Notice, TextDelta, ToolFinished, ToolStarted
-from heng_agent.core.version import prepare_dev_home, version_label
+from heng_agent.core.version import is_dev, prepare_dev_home, version_label
 from heng_agent.hooks import is_trusted, load_hooks
 from heng_agent.mcp import MCPManager, load_servers
 from heng_agent.mcp import is_trusted as mcp_is_trusted
@@ -29,6 +29,7 @@ from heng_agent.model.providers import PROJECT_CONFIG, Profile, config_path, loa
 from heng_agent.permissions import Permissions, Rules
 from heng_agent.session import SessionStore
 from heng_agent.tools.base import Tool, builtin_tools
+from heng_agent.updates import run_upgrade
 
 
 def _utf8_console() -> None:
@@ -301,6 +302,12 @@ def main(argv: list[str] | None = None) -> int:
     if not enable_shift_enter() and sys.platform == "win32":
         # 以前补丁因为导入路径写错静默失效，Shift+Enter 一直不能换行却没人发现：失败了要说出来
         print("⋯ Shift+Enter 换行没能启用（prompt_toolkit 版本变了？），可以先用 Ctrl+J 换行", file=sys.stderr)
+    raw = sys.argv[1:] if argv is None else argv
+    if raw[:1] == ["upgrade"]:  # heng-agent upgrade：升级到最新版
+        if is_dev():
+            print("这是开发版（直接跑仓库源码）：用 git pull 更新；正式版才用 heng-agent upgrade。", file=sys.stderr)
+            return 1
+        return run_upgrade()
     args = build_parser().parse_args(argv)
     try:
         settings = make_settings(args)  # 会读配置文件的 settings 段：写错了要给出可读的错误，而不是一堆堆栈

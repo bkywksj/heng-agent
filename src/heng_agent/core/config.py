@@ -45,6 +45,9 @@ class Settings(BaseModel):
         default=True,
         description="读 Claude Code 的用户级配置（~/.claude 的 CLAUDE.md、技能、子智能体）；项目里的不受影响",
     )
+    update_check: bool = Field(
+        default=True, description="每天最多一次在后台查有没有新版本，有就在欢迎页提示（开发版不查）"
+    )
     claude_hooks_skip: list[str] = Field(
         default_factory=list,
         description="不跑的 Claude Code 钩子：命令里含其中任一段文字就跳过（专给 Claude Code 自己用的集成钩子，"

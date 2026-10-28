@@ -6,7 +6,8 @@
 
 ## 安装
 
-一条命令装好（没有 uv 会先自动装 uv；pypi.org 连不上会自动改用清华镜像；已装过就升级到最新版）：
+一条命令装好（没有 uv 会先自动装 uv；pypi.org 连不上会自动改用清华镜像；已装过就升级到最新版）。
+有新版本时欢迎页会提示，运行 `heng-agent upgrade` 升级（每天最多后台查一次，可用 `settings.update_check` 关掉）：
 
 ```powershell
 # Windows（PowerShell）
@@ -24,7 +25,7 @@ curl -LsSf https://gitee.com/bkywksj/heng-agent/raw/master/install.sh | sh
 
 ```bash
 uv tool install heng-agent      # 装成全局命令，任何目录都能敲 heng-agent
-uv tool upgrade heng-agent      # 升级
+heng-agent upgrade              # 升级（Windows 上会开个新窗口、等 heng-agent 退出后再升级）
 uv tool uninstall heng-agent    # 卸载
 ```
 

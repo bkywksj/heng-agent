@@ -24,6 +24,7 @@ from heng_agent.core.errors import AgentError
 SETTINGS_KEYS = (
     "permission_mode", "max_tokens", "max_rounds", "bash_timeout", "context_window", "compact_ratio", "image_preview",
     "notify_after", "mcp_tool_search", "thinking", "thinking_budget", "claude_user_config", "claude_hooks_skip",
+    "update_check",
 )  # fmt: skip
 SECRET_KEYS = ("api_key",)
 
