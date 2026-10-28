@@ -1,10 +1,13 @@
-# 每次推送、每个合并请求：在 Windows / macOS / Linux 与 Python 3.11 / 3.13 上跑代码检查与全部测试。
-# 本地开发只在 Windows 上测过，开源后各平台的问题靠它及早发现。
+# 在 Windows / macOS / Linux 与 Python 3.11 / 3.13 上跑代码检查与全部测试。本地只在 Windows 上测，别的平台靠它发现问题。
+#
+# 不在推送分支时自动跑：每次 6 个任务，macOS 分钟数按 10 倍算，Actions 配额经不起每推一次就跑一遍。
+# 发布（release.yml，推 v 标签）前会跑同一套测试，所以平时只在两种情况下跑：
+# - 手动触发（发版前想先验证：GitHub 网页的 Actions → CI → Run workflow，或 Sigil 的 github_workflow_dispatch）；
+# - 别人提合并请求（我们自己推分支不会触发）。
 name: CI
 
 on:
-  push:
-    branches: [master, main]
+  workflow_dispatch:
   pull_request:
 
 jobs:

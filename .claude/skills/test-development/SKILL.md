@@ -58,7 +58,9 @@ PYTHONIOENCODING=utf-8 .venv/Scripts/python.exe -m pytest -q
 
 ## 跨平台（CI 在 Windows / macOS / Linux 上都跑）
 
-本地只有 Windows，别的平台的问题靠 CI 发现。CI 失败时每个失败的测试会写成 GitHub 注释，公开仓库不用凭据就能读：
+本地只有 Windows，别的平台的问题靠 CI 发现。**CI 不在推送时自动跑**（省 Actions 配额）：改动大、发版前要先验证时，
+用 Sigil 的 `github_workflow_dispatch` 手动触发 `ci.yml`（推 v 标签发布时 release.yml 也会跑同一套测试）。
+CI 失败时每个失败的测试会写成 GitHub 注释，公开仓库不用凭据就能读：
 `https://api.github.com/repos/bkywksj/heng-agent/check-runs/<任务 id>/annotations`（任务 id 从
 `/actions/runs/<运行 id>/jobs` 取；完整日志要管理员权限才能下载）。每个步骤最多显示 10 条错误注释。
 
