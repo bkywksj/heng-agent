@@ -5,7 +5,7 @@
 1. 配置档里写了 context_window：一直用它（推断错了可以手动纠正，/config set profiles.名字.context_window 数字）；
 2. 接口查得到：Anthropic 协议问 /v1/models/{模型}（官方返回 max_input_tokens），OpenAI 协议看模型列表里
    有没有带 context_length 之类的字段（OpenRouter 带）；中转站多半查不到，查不到不算错；
-3. 按模型名推断：只收录核对过官方文档的（目前是 Claude，见 claude-api 技能的模型表，2026-10）；
+3. 按模型名推断：只收录核对过官方文档的（Claude 见 claude-api 技能的模型表；其他家见 VENDOR_RULES 每行的出处）；
 4. 都没有：用设置里的 context_window（默认 128k）。
 
 宁小勿大：说小了只是压缩早一点；说大了请求会超长被拒。所以拿不准的型号不进表。
@@ -31,6 +31,36 @@ SOURCE_CONFIG, SOURCE_API, SOURCE_NAME, SOURCE_DEFAULT = "配置", "接口查询
 
 _CLAUDE = re.compile(r"claude-(opus|sonnet|haiku)-(\d+)(?:-(\d+))?")
 
+#: 其他家：(模型名里的模式, 上下文长度)。按顺序取第一个对得上的，具体的写在前面。
+#: 数字取自各家官方文档（2026-10-29 核对，出处见每行）；官方写了「最大输入」小于总长度的，用最大输入
+#: （自动压缩看的是输入）。官方页面上找不到的型号不写，宁可退回默认。
+VENDOR_RULES: list[tuple[re.Pattern[str], int]] = [
+    (re.compile(p), n)
+    for p, n in [
+        # DeepSeek：api-docs.deepseek.com/quick_start/pricing
+        (r"deepseek-(v4|flash)", 1_000_000),
+        # Kimi：platform.kimi.com/docs/models
+        (r"kimi-k3", 1_048_576),
+        (r"kimi-k2", 262_144),
+        # 智谱：docs.bigmodel.cn/cn/guide/start/model-overview
+        (r"glm-5\.[23]|glm-4-long", 1_000_000),
+        (r"glm-5|glm-4\.[67]", 200_000),
+        (r"glm-4\.5", 128_000),
+        # 通义千问：help.aliyun.com/zh/model-studio/text-generation-model/ 与 qwen3-8-max 页
+        # （qwen3.8-max 最大输入 983,616（开思考时）；同档其他型号没写最大输入，按同一个数）
+        (r"qwen3\.[78]-(max|plus|flash)|qwen-(plus|flash)|qwen3-coder-flash", 983_616),
+        (r"qwen-max$", 32_768),
+        # OpenAI：developers.openai.com/api/docs/models（gpt-6-astra 最大输入 922K，gpt-5 最大输入 272K）
+        (r"gpt-6", 922_000),
+        (r"gpt-5", 272_000),
+        (r"gpt-4\.1", 1_000_000),
+        # Gemini：ai.google.dev/gemini-api/docs/models（输入上限；图片、语音、实时模型不算）
+        (r"gemini-(2\.5|3)(?!.*(image|tts|live))", 1_048_576),
+        # MiniMax：platform.minimax.cn/docs/guides/models-intro
+        (r"minimax-m3", 1_000_000),
+    ]
+]
+
 
 def known(model: str) -> int | None:
     """按模型名推断上下文长度；不认识返回 None。
@@ -39,11 +69,12 @@ def known(model: str) -> int | None:
     Claude：Opus / Sonnet 4.6 起、Haiku 5 起、Fable、Mythos 都是 1M；更早的（Opus 4.5、Sonnet 4.5、Haiku 4.5、
     Claude 3.x……）按 200k。名字里带 [1m]（Claude Code 的写法）也按 1M。
     """
-    name = model.lower().replace(".", "-")
+    raw = model.lower()
+    name = raw.replace(".", "-")
     if "[1m]" in name:
         return M
     if "claude" not in name:
-        return None
+        return next((n for pattern, n in VENDOR_RULES if pattern.search(raw)), None)
     if re.search(r"claude-(fable|mythos)", name):
         return M
     m = _CLAUDE.search(name)

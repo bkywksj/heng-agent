@@ -31,8 +31,22 @@ M, K200 = 1_000_000, 200_000
         ("claude-sonnet-4-5", K200),
         ("claude-sonnet-4-20250514", K200),  # 后面是日期，不是 4.20250514
         ("claude-3-7-sonnet-20250219", K200),
-        ("deepseek-v4-pro", None),  # 没核实过的不猜
-        ("gpt-5.1", None),
+        ("deepseek-v4-pro", 1_000_000),
+        ("kimi-k2.7-code", 262_144),
+        ("kimi-k3.1-pro", 1_048_576),
+        ("glm-5.2", 1_000_000),
+        ("glm-5.1", 200_000),  # 5.2 / 5.3 在前面先认，别被 glm-5 截走
+        ("glm-4.5-air", 128_000),
+        ("qwen3.8-max", 983_616),
+        ("qwen-max", 32_768),
+        ("gpt-5.1", 272_000),  # 用官方写的最大输入，不用总长度 400K
+        ("openai/gpt-6-astra", 922_000),
+        ("gemini-3.8-flash", 1_048_576),
+        ("gemini-3.1-flash-image", None),  # 图片模型不算
+        ("MiniMax-M3", 1_000_000),
+        ("MiniMax-M2.7", None),  # 只在第三方页面上有，不收
+        ("qwen3-coder-plus", None),  # 官方页面上找不到了，不猜
+        ("mystery-model", None),
     ],
 )
 def test_known_by_model_name(model: str, window: int | None) -> None:
