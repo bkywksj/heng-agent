@@ -34,6 +34,7 @@ import httpx
 from heng_agent import __version__
 from heng_agent.core import trust as trust_store
 from heng_agent.core.errors import AgentError
+from heng_agent.core.net import http_client
 from heng_agent.core.types import ToolResult
 from heng_agent.tools.base import Tool, ToolContext
 from heng_agent.tools.shell import IS_WINDOWS, kill_tree
@@ -245,7 +246,7 @@ class HttpMCPClient(_Session):
 
     def __init__(self, config: ServerConfig, workdir: Path) -> None:
         self.config = config
-        self.http = httpx.Client(timeout=httpx.Timeout(config.timeout, connect=10.0))
+        self.http = http_client(timeout=httpx.Timeout(config.timeout, connect=10.0))
         self.session_id: str | None = None
         self.protocol: str | None = None
         self._next_id = 0

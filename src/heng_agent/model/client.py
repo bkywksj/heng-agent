@@ -17,6 +17,7 @@ from typing import Any, Protocol
 import httpx
 
 from heng_agent.core.errors import ModelError
+from heng_agent.core.net import http_client
 from heng_agent.core.types import Message, ModelEvent, TextDelta, ThinkingBlock, ThinkingDelta, ToolCall, TurnEnd
 from heng_agent.model.providers import Profile
 
@@ -221,7 +222,7 @@ class _HttpClient:
         self.profile = profile
         self.max_tokens = max_tokens
         # 长回复可能持续几分钟：读超时放宽，连接超时保持短，服务没起来时能快速报错
-        self.http = httpx.Client(timeout=httpx.Timeout(600.0, connect=10.0), transport=transport)
+        self.http = http_client(timeout=httpx.Timeout(600.0, connect=10.0), transport=transport)
         self._cancelled = threading.Event()  # 用户按了 ESC：这次请求作废，不重试
         self._active: httpx.Response | None = None  # 正在读的响应，取消时从别的线程关掉它
         self.sleep: Callable[[float], None] = self._cancellable_sleep  # 测试里换成不真睡的版本
@@ -393,7 +394,7 @@ def list_models(profile: Profile, transport: httpx.BaseTransport | None = None) 
         url, headers = f"{base}/models", {}
     headers.update(profile.auth_headers())
     try:
-        with httpx.Client(timeout=20.0, transport=transport) as http:
+        with http_client(timeout=20.0, transport=transport) as http:
             resp = http.get(url, headers=headers)
     except httpx.HTTPError as exc:
         raise ModelError(f"取模型列表失败：{type(exc).__name__}: {exc}") from exc

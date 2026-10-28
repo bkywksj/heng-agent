@@ -13,6 +13,7 @@ from typing import Any
 
 import httpx
 
+from heng_agent.core.net import http_client
 from heng_agent.core.types import ToolResult
 from heng_agent.tools.base import Tool, ToolContext
 
@@ -49,7 +50,7 @@ class WebFetch(Tool):
         if not url.startswith(("http://", "https://")):
             return ToolResult("只支持 http:// 或 https:// 开头的网址", is_error=True)
         try:
-            client = httpx.Client(timeout=20.0, follow_redirects=True, headers={"user-agent": "heng-agent"})
+            client = http_client(timeout=20.0, follow_redirects=True, headers={"user-agent": "heng-agent"})
             with client, client.stream("GET", url) as resp:
                 chunks, size = [], 0
                 for chunk in resp.iter_bytes():
