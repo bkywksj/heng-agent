@@ -206,3 +206,12 @@ def test_output_speed(tmp_path: Path, together: bool) -> None:
         assert 50 < agent.last_speed < 110
     else:  # 一段段来：按第一段到结束（约 0.3 秒）算，不含前面的等待
         assert agent.last_speed > 70
+
+
+@pytest.mark.parametrize(
+    "workdir", [r"E:\my\heng-agent", "E:\\my\\heng-agent\\", "/home/u/heng-agent", "/home/u/heng-agent/"]
+)
+def test_project_name_with_either_separator(workdir: str) -> None:
+    """项目名两种分隔符都认：以前用 Path(...).name，Linux 上不认反斜杠，Windows 写法的路径整串被当成名字（CI 撞到）。"""
+    info = _lines(toolbar("ask", "m", workdir, 0, 1))[0]
+    assert info.startswith(" ▣ heng-agent ")

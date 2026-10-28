@@ -5,8 +5,8 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Iterable
-from pathlib import Path
 
 from prompt_toolkit.completion import CompleteEvent, Completer, Completion
 from prompt_toolkit.document import Document
@@ -209,7 +209,9 @@ def info_line(model: str, workdir: str, used: int, window: int, *, thinking: str
               mcp: tuple[str, str] | None, branch: str | None, dirty: bool, speed: float | None,
               width: int | None, quota: tuple[str, str] | None = None) -> list[tuple[str, str]]:  # fmt: skip
     pct = used / window * 100 if window else 0.0
-    name = Path(workdir).name or workdir  # 完整路径欢迎页里有；这里只放项目名，省出地方
+    # 完整路径欢迎页里有；这里只放项目名。两种分隔符都认：Path(...).name 在 Linux 上不认反斜杠，
+    # Windows 写法的路径整串被当成名字（发 0.4.0 时 Linux 的 CI 撞到）
+    name = re.split(r"[\\/]", workdir.rstrip("\\/"))[-1] or workdir
     ctx_style, bar = context_bar(used, window, threshold)
     short_model = model.rsplit(" · ", 1)[-1]  # 「yongye · claude-sonnet-5」窄了只留模型名
     # 依次去掉的东西：每一步在前一步的基础上再少一样（额度最先去：可有可无，且长度不定）
