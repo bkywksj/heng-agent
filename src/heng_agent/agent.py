@@ -35,7 +35,9 @@ from heng_agent.core.types import (
     UserInterjection,
 )
 from heng_agent.hooks import Hook, HookRunner
+from heng_agent.model import context_window
 from heng_agent.model.client import ModelClient
+from heng_agent.model.context_window import window_key
 from heng_agent.permissions import Approver, Permissions
 from heng_agent.session import SessionStore
 from heng_agent.tools.base import Tool, ToolContext, builtin_tools
@@ -122,6 +124,8 @@ class Agent:
         self.last_input_tokens = 0  # 最近一次请求的输入 token：判断是否快撑满上下文
         #: 最近一次请求的输出速度（token/秒，从第一段输出到结束）；状态栏显示。没测到（太短、没用量）是 None
         self.last_speed: float | None = None
+        #: 接口查到的上下文长度，按（地址, 模型）记；界面在后台查（见 Repl._ensure_window），查不到记 0
+        self.fetched_windows: dict[tuple[str, str], int] = {}
         #: 每一问一个检查点：这一问开始时历史有多长、改过的文件原内容（None = 原来不存在）。/undo 用
         self.turns: list[dict[str, Any]] = []
         #: 整个会话里每个被改过的文件「第一次改之前」的内容（None = 原来不存在）。/diff 用
@@ -341,8 +345,14 @@ class Agent:
 
     @property
     def context_window(self) -> int:
+        return self.context_window_info[0]
+
+    @property
+    def context_window_info(self) -> tuple[int, str]:
+        """(上下文长度, 来源)：配置 → 接口查询（界面在后台查好放进 fetched_windows）→ 按模型名推断 → 默认。"""
         profile = getattr(self.client, "profile", None)
-        return int(getattr(profile, "context_window", 0) or self.settings.context_window)
+        fetched = self.fetched_windows.get(window_key(profile)) if profile is not None else None
+        return context_window.resolve(profile, fetched, self.settings.context_window)
 
     def compact(self, on_event: Callable[[AgentEvent], None], *, force: bool = False, instruction: str = "") -> bool:
         """输入超过上下文的 compact_ratio（或 force）时压缩历史。返回是否真的压缩了。instruction：用户对摘要的要求。"""

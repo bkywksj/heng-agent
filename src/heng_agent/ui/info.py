@@ -75,8 +75,10 @@ def show_status(repl: Repl) -> None:
     row("权限", f"{escape(MODE_LABEL.get(a.permissions.mode, a.permissions.mode))} · 思考 {thinking}")
     used = a.last_input_tokens
     pct = used / a.context_window * 100 if a.context_window else 0
-    row("上下文", f"{human_tokens(used)} / {human_tokens(a.context_window)}（{pct:.0f}%），"
-                  f"超过 {a.settings.compact_ratio:.0%} 自动压缩")  # fmt: skip
+    window, source = a.context_window_info
+    hint = "" if source == "配置" else "；不对就 /config set profiles.<服务商>.context_window 数字"
+    row("上下文", f"{human_tokens(used)} / {human_tokens(window)}（{pct:.0f}%），"
+                  f"超过 {a.settings.compact_ratio:.0%} 自动压缩 · [dim]长度来自{source}{hint}[/]")  # fmt: skip
     if repl.mcp_status:
         ok, tools, failed = mcp_view.counts(repl)
         row("MCP", f"{ok} 个服务 · {tools} 个工具" + (f" · [red]{failed} 个连不上[/]" if failed else ""))

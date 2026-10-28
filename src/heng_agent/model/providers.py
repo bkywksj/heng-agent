@@ -46,8 +46,11 @@ class Profile(BaseModel):
     # 密钥放哪个请求头：x-api-key（Anthropic 官方、DeepSeek）、bearer（Kimi、GLM、OpenAI 系）、auto 两个都带
     auth: AuthStyle = "auto"
     note: str = ""
-    context_window: int = Field(
-        default=128_000, gt=0, description="模型上下文长度（token）；输入超过它的 80% 时自动压缩对话历史"
+    context_window: int | None = Field(
+        default=None,
+        gt=0,
+        description="模型上下文长度（token），输入超过它的 80% 时自动压缩对话历史；"
+        "不写就自动定：接口查询 → 按模型名推断 → 设置里的 context_window（见 model/context_window.py）",
     )
     # 价格：每百万 token 多少钱。预设不带价格（各家常调价、分模型与时段），
     # 在配置文件里按控制台的价格填，/cost 就会显示金额
@@ -105,7 +108,6 @@ PRESETS: dict[str, Profile] = {
     "heng": Profile(protocol="anthropic", base_url="http://127.0.0.1:8765", model="heng-claude",
                     api_key_env="HENG_AGENT_API_KEY", note="本机 heng serve（自己的模型，或 proxy 转发）"),
     "anthropic": Profile(protocol="anthropic", base_url="https://api.anthropic.com", model="claude-sonnet-5-5",
-                         context_window=200_000,
                          api_key_env="ANTHROPIC_API_KEY", auth="x-api-key", note="Anthropic 官方 API"),
     "deepseek": Profile(protocol="anthropic", base_url="https://api.deepseek.com/anthropic", model="deepseek-v4-pro",
                         api_key_env="DEEPSEEK_API_KEY", note="DeepSeek（Anthropic 兼容接口）"),

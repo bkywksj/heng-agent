@@ -46,8 +46,9 @@ from heng_agent.core.version import is_dev, version_label
 from heng_agent.hooks import Hook
 from heng_agent.hooks import trust as trust_hooks
 from heng_agent.mcp import MCPManager, ServerConfig
-from heng_agent.model import quota, thinking
+from heng_agent.model import context_window, quota, thinking
 from heng_agent.model.client import make_client
+from heng_agent.model.context_window import window_key
 from heng_agent.model.providers import load_profiles
 from heng_agent.model.thinking import EFFORT_NAME, EFFORTS
 from heng_agent.session import SessionStore
@@ -288,6 +289,27 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin, Tu
         profile = getattr(self.agent.client, "profile", None)
         return getattr(profile, "base_url", "") or ""
 
+    def _ensure_window(self) -> None:
+        """配置档没写 context_window 时，在后台向服务商查一次这个模型的上下文长度（换了模型就再查）。
+
+        查到之前按模型名推断；查不到记 0，不再查。查到后状态栏、自动压缩都用新值。"""
+        a = self.agent
+        profile = getattr(a.client, "profile", None)
+        if profile is None or profile.context_window:
+            return
+        key = window_key(profile)
+        if key in a.fetched_windows:
+            return
+        a.fetched_windows[key] = 0  # 先占上：正在查，别重复发
+
+        def work() -> None:
+            a.fetched_windows[key] = context_window.fetch(profile) or 0
+            app = get_app_or_none()
+            if app is not None:
+                app.invalidate()  # 输入框开着：状态栏马上换成查到的值
+
+        threading.Thread(target=work, name="heng-window", daemon=True).start()
+
     def _custom_line(self) -> list[tuple[str, str]] | None:
         """用户状态栏命令的输出（还没跑完第一次时 None：先显示内置的第一行）；出错的说明用红字。"""
         value = self._bar_custom.value
@@ -307,6 +329,7 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin, Tu
             self._quota_for = (url, time.monotonic())
             key, proxy = profile.resolve_key(), getattr(profile, "proxy", None)
             self._bar_quota.refresh(lambda: quota.fetch(url, key, proxy=proxy))
+        self._ensure_window()
         command = self._bar_command
         if command:
             data = statusline.payload(
