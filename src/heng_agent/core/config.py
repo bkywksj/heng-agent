@@ -63,7 +63,7 @@ class Settings(BaseModel):
     status_line: str | None = Field(
         default=None,
         description="状态栏命令：输出替换状态栏第一行（可带颜色），从标准输入收到会话信息的 JSON。"
-        "不设 = 用 Claude Code 的 statusLine（~/.claude/settings.json）；空字符串 = 不用。只认用户配置",
+        "不设 = 内置的第一行；claude = 用 Claude Code 的 statusLine（~/.claude/settings.json）。只认用户配置",
     )
 
     @field_validator("status_line", mode="before")

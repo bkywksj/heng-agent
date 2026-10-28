@@ -3,8 +3,8 @@
 两样都要起子进程，不能在每次重画时跑（输入框每 0.1 秒就可能重画一次）：都在后台线程里跑、结果缓存，
 跑完叫输入框重画。每次显示输入框前（一问答完）刷新一次，跟 Claude Code「对话有变化时更新」的节奏一致。
 
-状态栏命令：settings 的 status_line（用户配置里写，项目配置不认——它会执行命令），没写就用 Claude Code 的
-~/.claude/settings.json 里的 statusLine（claude_user_config 关掉就不读）。命令从标准输入收到一段 JSON
+状态栏命令：settings 的 status_line（用户配置里写，项目配置不认——它会执行命令）。没写就用内置的第一行；
+写 "claude" 表示用 Claude Code 的 ~/.claude/settings.json 里的 statusLine。命令从标准输入收到一段 JSON
 （字段与 Claude Code 的一致：model、workspace、cwd、session_id、context_window……，另有 heng 段），
 标准输出的前几行替换状态栏第一行，可以带 ANSI 颜色。这样给 Claude Code 写的状态栏脚本可以直接用。
 """
@@ -27,6 +27,7 @@ from heng_agent.tools.shell import shell_argv
 
 COMMAND_TIMEOUT = 5.0  # 状态栏命令最多跑这么久：卡住的脚本不能让状态栏一直不更新
 MAX_LINES = 3  # 命令输出最多取前几行
+CLAUDE = "claude"  # status_line 写这个：用 Claude Code 配的 statusLine
 
 
 def git_state(workdir: Path) -> tuple[str, bool] | None:
@@ -52,12 +53,16 @@ def git_state(workdir: Path) -> tuple[str, bool] | None:
 
 
 def load_command(settings: Any) -> str | None:
-    """要跑的状态栏命令：heng 自己的设置优先；设成空字符串表示不要（也不用 Claude Code 的）。"""
-    own = getattr(settings, "status_line", None)
-    if own is not None:
-        return own.strip() or None
+    """要跑的状态栏命令；None = 用内置的第一行。
+
+    以前没写就自动用 Claude Code 的 statusLine，结果打开 heng 看到的是给 Claude 写的那一行，不是 heng 自己的
+    （用户反馈「应该跑我们设计的逻辑」）。现在要明确写 "claude" 才用它。
+    """
+    own = (getattr(settings, "status_line", None) or "").strip()
+    if own.lower() != CLAUDE:
+        return own or None
     if not getattr(settings, "claude_user_config", True):
-        return None
+        return None  # 关掉了读 Claude Code 的用户配置
     try:
         data = json.loads((claude_home() / "settings.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):

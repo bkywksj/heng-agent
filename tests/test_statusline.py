@@ -98,10 +98,11 @@ def test_command_from_claude_settings(tmp_path: Path, monkeypatch: pytest.Monkey
                                           encoding="utf-8")  # fmt: skip
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(claude))
     home = tmp_path / "h"
-    assert statusline.load_command(Settings(home=home)) == "node s.js"  # 给 Claude Code 写的直接用
-    assert statusline.load_command(Settings(home=home, status_line="mine")) == "mine"  # 自己的优先
-    assert statusline.load_command(Settings(home=home, status_line="")) is None  # 空字符串 = 不要
-    assert statusline.load_command(Settings(home=home, claude_user_config=False)) is None
+    # 默认用 heng 自己的第一行：以前自动用 Claude Code 的，打开 heng 看到的是给 Claude 写的那一行（用户反馈）
+    assert statusline.load_command(Settings(home=home)) is None
+    assert statusline.load_command(Settings(home=home, status_line="claude")) == "node s.js"  # 明确要才用
+    assert statusline.load_command(Settings(home=home, status_line="mine")) == "mine"
+    assert statusline.load_command(Settings(home=home, status_line="claude", claude_user_config=False)) is None
 
 
 def test_setting_accepts_claude_form() -> None:
