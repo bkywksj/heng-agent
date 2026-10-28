@@ -116,6 +116,10 @@ class Agent:
         self.originals: dict[str, bytes | None] = {}
         #: 当前在干什么：model（等模型）/ tool（跑工具）/ None（空闲）。cancel() 据此选中断方式
         self._phase: str | None = None
+        #: 跑 run() 的线程：cancel() 只在它是主线程时才给主线程发中断
+        self._run_thread: threading.Thread | None = None
+        #: 取消标志是不是自己的（子智能体共用主智能体的，不归它清）
+        self._owns_cancel = True
 
     def cancel(self) -> None:
         """从别的线程中断当前任务（ESC）。按所处阶段选法子，两种不能同时用：
@@ -124,10 +128,22 @@ class Agent:
         - 跑工具：给主线程发中断（命令工具每 0.1 秒醒一次，收到就杀进程树）。
         等模型时若也发中断，会多出一个挂起的 KeyboardInterrupt，之后在随便什么地方冒出来。
         """
+        self.ctx.cancelled.set()  # 不在主线程跑时（--acp）靠它：工具与每一轮开始前都会看
         if self._phase == "model" and hasattr(self.client, "cancel"):
             self.client.cancel()
-        elif self._phase is not None:
+        elif self._phase is not None and self._run_thread in (None, threading.main_thread()):
             _thread.interrupt_main()
+
+    def _share_cancel(self, sub: Agent) -> None:
+        """子智能体共用主智能体的取消标志：取消主任务时它一起停。由主智能体负责清标志——子智能体自己开始时
+        不能清，否则主任务刚被取消、子智能体一启动就把取消吞了。"""
+        sub.ctx.cancelled = self.ctx.cancelled
+        sub._owns_cancel = False
+
+    def _check_cancelled(self) -> None:
+        """被取消了就按「用户中断」处理（抛 KeyboardInterrupt，走和 ESC 一样的收尾）。"""
+        if self.ctx.cancelled.is_set():
+            raise KeyboardInterrupt
 
     def _hook_info(self) -> dict[str, Any]:
         """Claude 钩子输入里的会话信息。transcript_path 给的是 heng-agent 的会话文件（格式和 Claude 的不同，
@@ -149,11 +165,13 @@ class Agent:
             tools = [t for t in builtin_tools() if t.name in names]
             sub = Agent(settings.model_copy(update={"permission_mode": "plan"}), self.client, tools=tools,
                         subagents=False)  # fmt: skip
+            self._share_cancel(sub)
             return sub, lambda tool, args: "deny"
         tools = [t for t in builtin_tools() if t.name in role.tools]
         permissions = Permissions(self.permissions.mode, self.permissions.rules)
         sub = Agent(settings.model_copy(update={"permission_mode": self.permissions.mode}), self.client, tools=tools,
                     permissions=permissions, subagents=False)  # fmt: skip
+        self._share_cancel(sub)
         sub.ctx.snapshot = self._snapshot  # 子智能体改的文件也记进主智能体这一问：/undo 能恢复
         approve = self._approve or (lambda tool, args: "deny")
         return sub, approve
@@ -357,6 +375,7 @@ class Agent:
             self.messages.append({"role": "user", "content": results})
 
     def _execute(self, call: ToolCall, on_event: Callable[[AgentEvent], None], approve: Approver) -> dict[str, Any]:
+        self._check_cancelled()  # 一轮里有好几个工具调用：取消后剩下的不再跑
         tool = self.tools.get(call.name)
         on_event(ToolStarted(call.id, call.name, call.input))
         denied = False
@@ -425,6 +444,9 @@ class Agent:
     ) -> TurnDone:
         """images：Anthropic 图片块（context.mention_images 给出），跟在文字后面一起发给模型。"""
         self._approve = approve
+        if self._stop_depth == 0 and self._owns_cancel:
+            self.ctx.cancelled.clear()  # 上一问的取消不算数（子智能体不清：标志是主智能体的）
+            self._run_thread = threading.current_thread()
         if self._stop_depth == 0 and self.hooks.has("user_prompt_submit"):
             # user_prompt_submit 钩子：退出码 2 拦下这条消息；其余输出作为补充上下文附在后面
             outcome = self.hooks.run_event("user_prompt_submit", user_text)
@@ -445,6 +467,7 @@ class Agent:
         empty_retries = 0  # 这一问里因为空回复重新请求了几次
         while rounds < self.settings.max_rounds:
             rounds += 1
+            self._check_cancelled()
             self.compact(on_event)  # 上一次请求已经快撑满上下文时，先压缩再发
             specs = self.tool_specs()  # 每轮重算：上一轮 tool_search 加载的工具这一轮要带上
             text: list[str] = []

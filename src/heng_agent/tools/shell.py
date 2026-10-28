@@ -77,8 +77,9 @@ def spawn(argv: list[str], cwd: Any, env: dict[str, str] | None) -> subprocess.P
 
 
 def run_command(
-    argv: list[str], cwd: Any, timeout: float, env: dict[str, str] | None, detach: threading.Event | None = None
-) -> tuple[int | None, str]:
+    argv: list[str], cwd: Any, timeout: float, env: dict[str, str] | None, detach: threading.Event | None = None,
+    cancelled: threading.Event | None = None,
+) -> tuple[int | None, str]:  # fmt: skip
     """跑命令，返回 (退出码, 合并输出)。超时返回 (None, 已有输出)；被 Ctrl+C 打断时先杀进程树再把中断抛出去；
     detach 被置上（用户按 Ctrl+B）时抛 Detached，进程不杀、输出接着收，交给后台任务。
 
@@ -96,6 +97,8 @@ def run_command(
     code: int | None = None
     try:
         while (code := proc.poll()) is None:
+            if cancelled is not None and cancelled.is_set():
+                raise KeyboardInterrupt  # 不在主线程时的中断（--acp）：下面统一杀进程树
             if detach is not None and detach.is_set():
                 detach.clear()
                 raise Detached(proc, buffer)
@@ -145,7 +148,7 @@ class Bash(Tool):
             return ToolResult(f"已在后台启动 {task.id}（PID {proc.pid}）。用 bash_output 看输出，kill_task 停止。")
         timeout = float(args.get("timeout") or ctx.bash_timeout)
         try:
-            code, output = run_command(shell_argv(command), ctx.workdir, timeout, env, ctx.detach)
+            code, output = run_command(shell_argv(command), ctx.workdir, timeout, env, ctx.detach, ctx.cancelled)
         except Detached as moved:
             task = ctx.tasks.adopt(command, moved.proc, moved.buffer)
             so_far = clip(moved.buffer.read_new()[0]).rstrip()

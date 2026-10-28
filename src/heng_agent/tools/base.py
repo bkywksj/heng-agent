@@ -30,6 +30,9 @@ class ToolContext:
     tasks: TaskManager = field(default_factory=TaskManager)
     #: 用户按了 Ctrl+B：正在前台跑的命令转到后台
     detach: Event = field(default_factory=Event)
+    #: 取消当前任务（Agent.cancel 置上）：核心循环不在主线程跑时（如 --acp 模式）中断靠它——
+    #: 给主线程发 KeyboardInterrupt 打断的是协议那边，真正干活的线程停不下来。命令工具每 0.1 秒看一次
+    cancelled: Event = field(default_factory=Event)
 
     def before_write(self, path: Path) -> None:
         if self.snapshot is not None:
