@@ -154,3 +154,14 @@ def test_plain_doctor_does_not_copy(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(repl_module, "copy_text", lambda text: pytest.fail("不带 copy 不该复制"))
     repl, _ = _doctor_repl(tmp_path, monkeypatch)
     repl.handle_command("/doctor")
+
+
+def test_clipboard_text_has_no_bom(monkeypatch: pytest.MonkeyPatch) -> None:
+    """以前往 clip 写 utf-16（自带 BOM），复制下来的内容开头多一个看不见的字符，贴进 issue 也带着（读剪贴板发现）。"""
+    from heng_agent.ui import session_tools
+
+    sent: list[bytes] = []
+    monkeypatch.setattr(session_tools.sys, "platform", "win32")
+    monkeypatch.setattr(session_tools.subprocess, "run", lambda argv, input, **kw: sent.append(input))
+    assert session_tools.copy_text("诊断信息")[0]
+    assert sent[0] == "诊断信息".encode("utf-16-le")  # 不带 BOM（\xff\xfe）

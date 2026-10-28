@@ -39,8 +39,9 @@ def copy_text(text: str) -> tuple[bool, str]:
     """把文字放进剪贴板。返回 (成功, 说明)。"""
     try:
         if sys.platform == "win32":
-            # clip 读 UTF-16 才不会把中文弄成乱码（Python 的 utf-16 编码自带 BOM，clip 认得）
-            subprocess.run(["clip"], input=text.encode("utf-16"), check=True, timeout=10)
+            # clip 读 UTF-16 才不会把中文弄成乱码。用不带 BOM 的 utf-16-le：以前用 utf-16（自带 BOM），
+            # clip 把 BOM 当成一个字符留在了开头，贴进 issue 开头多一个看不见的字符（真实终端里读剪贴板发现）
+            subprocess.run(["clip"], input=text.encode("utf-16-le"), check=True, timeout=10)
         elif sys.platform == "darwin":
             subprocess.run(["pbcopy"], input=text.encode("utf-8"), check=True, timeout=10)
         else:
