@@ -137,19 +137,25 @@ heng-agent --provider heng --model heng-mini-0.1
 
 - 输入框：**Enter 发送，Shift+Enter 换行**（其他终端里用 Ctrl+J / Alt+Enter），`/` 补全命令，`@` 补全文件路径，
   Shift+Tab 切换权限模式（边框颜色跟着变）。
-- **底部状态栏**两行：第一行是项目名与 git 分支（`*` = 有没提交的改动）· 服务商与模型 · MCP 连接情况 ·
-  上一次的输出速度 · 上下文进度条；第二行是权限模式与提醒（后台任务、快到自动压缩）。窗口窄时第一行按
-  速度 → 分支 → 服务商名 → token 数 → 进度条的顺序省掉，不会截断。
-- **自定义状态栏**（兼容 Claude Code 的 `statusLine`）：给 Claude Code 写过状态栏脚本的，heng-agent 直接用
-  `~/.claude/settings.json` 里的 `statusLine`；也可以在用户配置里写自己的（只认用户配置，项目配置里写了不生效——它会执行命令）：
+- **底部状态栏**两行：第一行是项目名与 git 分支（`*` = 有没提交的改动）· 服务商与模型 · MCP · 上一次的输出速度 ·
+  上下文进度条 · 额度；第二行是权限模式与提醒（后台任务、快到自动压缩）。窗口窄时第一行按
+  额度 → 速度 → 分支 → 服务商名 → token 数 → 进度条的顺序省掉，不会截断。
+  - **MCP**：`⠹ MCP 3` 橙色 = 还在连（数字是已连上的个数），`✓ MCP 6` 绿色 = 都连上了，`✗ MCP 5` 红色 = 有连不上的
+    （`/mcp` 看原因）。三种写法一样宽，连接过程中状态栏不跳动。
+  - **额度**：按服务地址认出服务商，用同一把 API key 查（每 3 分钟最多一次，后台查、不拖慢输入）：
+    DeepSeek、Moonshot、硅基流动显示余额；Kimi Code 显示 5 小时与本周期剩几次；智谱 GLM Coding Plan 显示
+    5 小时已用百分比与重置倒计时；new-api / one-api 一类中转站显示余额（不限额度的显示已用多少）。
+    查不到的（本机服务、Anthropic 官方订阅要登录令牌、OpenRouter 要管理密钥）就不显示。
+- **自定义状态栏**：在用户配置里写一条命令，它的输出替换状态栏第一行（只认用户配置，项目配置里写了不生效——它会执行命令）：
 
   ```json
   {"settings": {"status_line": "node ~/my-statusline.js"}}
   ```
 
-  命令从标准输入收到会话信息的 JSON（字段同 Claude Code：`model`、`workspace`、`cwd`、`session_id`、`context_window`，
-  另有 `heng` 段：服务商、权限模式、输出速度），标准输出的前三行替换状态栏第一行，可以带 ANSI 颜色；
-  每问答完刷新一次，超过 5 秒没结束算失败。`"status_line": ""` 表示不用（也不用 Claude Code 的）。
+  命令从标准输入收到会话信息的 JSON（字段同 Claude Code 的 statusLine：`model`、`workspace`、`cwd`、`session_id`、
+  `context_window`，另有 `heng` 段：服务商、权限模式、输出速度），标准输出的前三行替换第一行，可以带 ANSI 颜色；
+  每问答完刷新一次，超过 5 秒没结束算失败；MCP 状态挪到第二行。给 Claude Code 写过状态栏脚本的，
+  写 `"status_line": "claude"` 就直接用 `~/.claude/settings.json` 里的 `statusLine`。不写就是上面的内置两行。
 - **拖入文件 / 粘贴截图**：消息里出现的文件绝对路径（拖入文件、**智码终端里 Ctrl+V 粘贴的截图**都是这样进来的）
   发送时自动变成附件；工作目录以外的文件先复制到 `.heng-agent/attachments/`（自带 `.gitignore`，不进仓库）。
   在 Windows Terminal 里粘贴截图用 **Alt+V**：Windows Terminal 自己处理 Ctrl+V 且只粘文字，截图到不了程序
