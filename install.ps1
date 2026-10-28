@@ -75,15 +75,25 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 # 4. 命令目录加进 PATH（已经在了就什么都不做；HENG_AGENT_NO_MODIFY_PATH=1 跳过，测试与 CI 用）
-if (-not $env:HENG_AGENT_NO_MODIFY_PATH) { & uv tool update-shell 2>$null | Out-Null }
+if (-not $env:HENG_AGENT_NO_MODIFY_PATH) {
+    # uv 往标准错误写一句「已经在 PATH 里了 / 已更新 PATH」。Windows PowerShell 5.1 里重定向外部程序的标准错误时，
+    # 每一行都算一个错误，$ErrorActionPreference = 'Stop' 下整个脚本就此中断——装好了却看不到「安装完成」，
+    # 还冒出一段像报错的红字（实测：升级本机正式版时）。这一句临时不按错误停下
+    $ErrorActionPreference = 'Continue'
+    & uv tool update-shell *> $null
+    $ErrorActionPreference = 'Stop'
+}
 
 Say ""
 Say "$([char]0x2713) $([char]0x5B89)$([char]0x88C5)$([char]0x5B8C)$([char]0x6210)" 'Green'
+# 实际装到哪（可能被 UV_TOOL_BIN_DIR 改过），别写死。同上：重定向标准错误时临时不按错误停下
+$ErrorActionPreference = 'Continue'
 $Bin = (& uv tool dir --bin 2>$null)
+$ErrorActionPreference = 'Stop'
 if (-not (Get-Command heng-agent -ErrorAction SilentlyContinue)) {
     Say "  $([char]0x65B0)$([char]0x5F00)$([char]0x4E00)$([char]0x4E2A)$([char]0x7EC8)$([char]0x7AEF)$([char]0x7A97)$([char]0x53E3)$([char]0xFF08)$([char]0x8BA9) PATH $([char]0x751F)$([char]0x6548)$([char]0xFF09)$([char]0xFF0C)$([char]0x8FDB)$([char]0x5165)$([char]0x4F60)$([char]0x7684)$([char]0x9879)$([char]0x76EE)$([char]0x76EE)$([char]0x5F55)$([char]0xFF0C)$([char]0x8F93)$([char]0x5165)$([char]0xFF1A)heng-agent" 'Cyan'
 } else {
     Say "  $([char]0x8FDB)$([char]0x5165)$([char]0x4F60)$([char]0x7684)$([char]0x9879)$([char]0x76EE)$([char]0x76EE)$([char]0x5F55)$([char]0xFF0C)$([char]0x8F93)$([char]0x5165)$([char]0xFF1A)heng-agent" 'Cyan'
 }
-Say "  $([char]0x7B2C)$([char]0x4E00)$([char]0x6B21)$([char]0x8FD0)$([char]0x884C)$([char]0x4F1A)$([char]0x5F15)$([char]0x5BFC)$([char]0x4F60)$([char]0x9009)$([char]0x670D)$([char]0x52A1)$([char]0x5546)$([char]0x3001)$([char]0x586B) API $([char]0x5BC6)$([char]0x94A5)$([char]0xFF1B)$([char]0x4EE5)$([char]0x540E)$([char]0x5347)$([char]0x7EA7)$([char]0x518D)$([char]0x8FD0)$([char]0x884C)$([char]0x4E00)$([char]0x6B21)$([char]0x672C)$([char]0x811A)$([char]0x672C)$([char]0xFF0C)$([char]0x6216) uv tool upgrade heng-agent"
+Say "  $([char]0x7B2C)$([char]0x4E00)$([char]0x6B21)$([char]0x8FD0)$([char]0x884C)$([char]0x4F1A)$([char]0x5F15)$([char]0x5BFC)$([char]0x4F60)$([char]0x9009)$([char]0x670D)$([char]0x52A1)$([char]0x5546)$([char]0x3001)$([char]0x586B) API $([char]0x5BC6)$([char]0x94A5)$([char]0xFF1B)$([char]0x4EE5)$([char]0x540E)$([char]0x5347)$([char]0x7EA7)$([char]0x8FD0)$([char]0x884C) heng-agent upgrade$([char]0xFF08)$([char]0x6216)$([char]0x518D)$([char]0x8FD0)$([char]0x884C)$([char]0x4E00)$([char]0x6B21)$([char]0x672C)$([char]0x811A)$([char]0x672C)$([char]0xFF09)"
 Say "  $([char]0x547D)$([char]0x4EE4)$([char]0x88C5)$([char]0x5728)$([char]0xFF1A)$Bin"

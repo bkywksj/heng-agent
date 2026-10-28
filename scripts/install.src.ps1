@@ -74,15 +74,25 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 # 4. 命令目录加进 PATH（已经在了就什么都不做；HENG_AGENT_NO_MODIFY_PATH=1 跳过，测试与 CI 用）
-if (-not $env:HENG_AGENT_NO_MODIFY_PATH) { & uv tool update-shell 2>$null | Out-Null }
+if (-not $env:HENG_AGENT_NO_MODIFY_PATH) {
+    # uv 往标准错误写一句「已经在 PATH 里了 / 已更新 PATH」。Windows PowerShell 5.1 里重定向外部程序的标准错误时，
+    # 每一行都算一个错误，$ErrorActionPreference = 'Stop' 下整个脚本就此中断——装好了却看不到「安装完成」，
+    # 还冒出一段像报错的红字（实测：升级本机正式版时）。这一句临时不按错误停下
+    $ErrorActionPreference = 'Continue'
+    & uv tool update-shell *> $null
+    $ErrorActionPreference = 'Stop'
+}
 
 Say ""
 Say "✓ 安装完成" 'Green'
-$Bin = (& uv tool dir --bin 2>$null)  # 实际装到哪（可能被 UV_TOOL_BIN_DIR 改过），别写死
+# 实际装到哪（可能被 UV_TOOL_BIN_DIR 改过），别写死。同上：重定向标准错误时临时不按错误停下
+$ErrorActionPreference = 'Continue'
+$Bin = (& uv tool dir --bin 2>$null)
+$ErrorActionPreference = 'Stop'
 if (-not (Get-Command heng-agent -ErrorAction SilentlyContinue)) {
     Say "  新开一个终端窗口（让 PATH 生效），进入你的项目目录，输入：heng-agent" 'Cyan'
 } else {
     Say "  进入你的项目目录，输入：heng-agent" 'Cyan'
 }
-Say "  第一次运行会引导你选服务商、填 API 密钥；以后升级再运行一次本脚本，或 uv tool upgrade heng-agent"
+Say "  第一次运行会引导你选服务商、填 API 密钥；以后升级运行 heng-agent upgrade（或再运行一次本脚本）"
 Say "  命令装在：$Bin"

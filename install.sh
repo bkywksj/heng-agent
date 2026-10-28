@@ -60,4 +60,4 @@ if command -v heng-agent >/dev/null 2>&1; then
 else
     say "  重开一个终端（让 PATH 生效），进入你的项目目录，输入：heng-agent"
 fi
-say "  第一次运行会引导你选服务商、填 API 密钥；以后升级再运行一次本脚本，或 uv tool upgrade heng-agent"
+say "  第一次运行会引导你选服务商、填 API 密钥；以后升级运行 heng-agent upgrade（或再运行一次本脚本）"
