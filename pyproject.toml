@@ -25,7 +25,7 @@ classifiers = [
 ]
 requires-python = ">=3.11"
 dependencies = [
-    "httpx>=0.27",        # 流式调用模型（Anthropic Messages 协议）
+    "httpx[socks]>=0.27", # 流式调用模型（Anthropic Messages 协议）；[socks]：代理可以写 socks5://
     "rich>=13",           # 终端渲染：Markdown、代码高亮、改动对比
     "prompt_toolkit>=3.0", # 输入框：多行、历史、斜杠命令补全
     "pydantic>=2.6",      # 配置与消息的严格校验

@@ -98,6 +98,12 @@ heng-agent --provider deepseek
 - `preset`：继承一个内置预设，只写要改的字段。
 - 密钥二选一：`api_key_env`（读环境变量，推荐）或 `api_key`（写在这个文件里；文件只在你的用户目录，不会进任何项目）。
 - `auth`：密钥放哪个请求头，`auto`（默认，两种都带）/ `x-api-key` / `bearer`。中转站报 401 时试试改这个。
+- **代理**：默认按 `HTTP_PROXY` / `HTTPS_PROXY` 等环境变量走。要单独指定，在 `settings` 里写 `"proxy"`
+  （管模型请求、MCP 的 http 连接、web_fetch），或在某个配置档里写 `"proxy"`（只管这个服务商，优先于 `settings`）。
+  取值：代理地址 `http://主机:端口`、`socks5://主机:端口`，或 `direct`（不走代理，环境变量设了也不用）。
+  例如国外的走代理、国内的直连：`"settings": {"proxy": "http://127.0.0.1:7890"}`，再给 `deepseek` 配置档写 `"proxy": "direct"`。
+  本机地址（localhost、127.0.0.1）始终直连；代理只能写在用户配置里，项目配置写了会报错（别人的仓库不能替你决定请求发到哪）。
+  `/doctor` 会显示当前实际走的代理。
 
 **不支持 Claude 订阅账号登录（OAuth）**：Anthropic 的条款只允许订阅账号的登录凭据用在它自己的客户端里，
 第三方工具使用有封号风险。用 Claude 请用 API 密钥（`anthropic` 预设）或中转站。

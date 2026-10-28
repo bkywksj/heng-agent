@@ -24,6 +24,8 @@ class ToolContext:
 
     workdir: Path
     bash_timeout: float = 120.0
+    #: web_fetch 走的代理（settings.proxy：None 按环境变量、direct 不走代理、或代理地址）
+    proxy: str | None = None
     snapshot: Callable[[Path], None] | None = None
     todos: list[dict[str, str]] = field(default_factory=list)
     #: 后台任务（bash run_in_background、Ctrl+B 转过来的命令）

@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Literal
 from heng_agent import configfile
 from heng_agent.context import MEMORY_WARN_TOKENS, estimate_tokens, load_memories, memory_files
 from heng_agent.core.errors import AgentError
+from heng_agent.core.net import describe_proxy
 from heng_agent.core.version import version_label
 from heng_agent.hooks import is_trusted, load_hooks
 from heng_agent.mcp import is_trusted as mcp_is_trusted
@@ -49,6 +50,8 @@ def run_checks(repl: Repl) -> list[Check]:
             key_ok = bool(profile.resolve_key())
             key_note = "已设置" if key_ok else f"没有密钥（{profile.api_key_env or 'api_key'} 未设置）"
             checks.append(("ok" if key_ok else "warn", "密钥", key_note))
+        # 连不上时第一个要问的：请求到底走没走代理、走的哪个（地址里的密码遮掉）
+        checks.append(("ok", "代理", describe_proxy(profile.proxy)))
         started = time.monotonic()
         try:
             models = list_models(profile)

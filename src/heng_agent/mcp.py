@@ -247,9 +247,9 @@ class HttpMCPClient(_Session):
     关闭时发 DELETE 结束会话。对方本来就在跑，不归我们启停。
     """
 
-    def __init__(self, config: ServerConfig, workdir: Path) -> None:
+    def __init__(self, config: ServerConfig, workdir: Path, proxy: str | None = None) -> None:
         self.config = config
-        self.http = http_client(timeout=httpx.Timeout(config.timeout, connect=10.0))
+        self.http = http_client(timeout=httpx.Timeout(config.timeout, connect=10.0), proxy=proxy)
         self.session_id: str | None = None
         self.protocol: str | None = None
         self._next_id = 0
@@ -377,13 +377,16 @@ class MCPManager:
     单个服务可以断开（/mcp disable）、重连（/mcp reconnect、enable）：崩了或刚更新过的服务不用重启 heng-agent。
     """
 
-    def __init__(self, servers: list[ServerConfig], workdir: Path, *, background: bool = False) -> None:
+    def __init__(
+        self, servers: list[ServerConfig], workdir: Path, *, background: bool = False, proxy: str | None = None
+    ) -> None:
         """background=True：在后台线程里连，构造函数立即返回（交互界面用：欢迎页不用等最慢的服务）。
 
         后台连接时，连完之前 tools / clients 是空的、status 里是「连接中」的占位；连完前不要读写它们，
         先 wait()——交互界面在用户每次提交输入时做这一步（见 Repl._sync_mcp）。
         """
         self.workdir = workdir
+        self.proxy = proxy  # http 连接走的代理（settings.proxy）；stdio 服务是本机进程，不涉及
         self.configs = {s.name: s for s in servers}  # 重连要用原配置
         self.clients: dict[str, _Session] = {}  # 服务名 → 连接
         self.tools: list[MCPTool] = []
@@ -438,7 +441,7 @@ class MCPManager:
         """建连接并握手，返回 (连接, 工具定义) 或失败原因。不碰共享状态，可以在线程里并行跑。"""
         client: _Session | None = None  # 失败时只关这一个，不能误关别的服务
         try:
-            client = HttpMCPClient(config, self.workdir) if config.url else MCPClient(config, self.workdir)
+            client = HttpMCPClient(config, self.workdir, self.proxy) if config.url else MCPClient(config, self.workdir)
             return client, client.initialize()
         except AgentError as exc:
             if client is not None:

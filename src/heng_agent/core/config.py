@@ -9,8 +9,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from heng_agent.core.net import check_proxy
 from heng_agent.core.version import default_home
 
 PermissionMode = Literal["ask", "accept-edits", "plan", "auto"]
@@ -48,6 +49,17 @@ class Settings(BaseModel):
     update_check: bool = Field(
         default=True, description="每天最多一次在后台查有没有新版本，有就在欢迎页提示（开发版不查）"
     )
+    proxy: str | None = Field(
+        default=None,
+        description="代理：不设 = 按 HTTP_PROXY 等环境变量；direct = 不走代理；或 http://主机:端口、socks5://主机:端口。"
+        "管模型请求、MCP（http）、web_fetch；服务商配置档里写了 proxy 的，模型请求以配置档为准；本机地址始终直连",
+    )
+
+    @field_validator("proxy")
+    @classmethod
+    def _check_proxy(cls, value: str | None) -> str | None:
+        return check_proxy(value)
+
     claude_hooks_skip: list[str] = Field(
         default_factory=list,
         description="不跑的 Claude Code 钩子：命令里含其中任一段文字就跳过（专给 Claude Code 自己用的集成钩子，"

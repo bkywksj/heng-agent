@@ -50,7 +50,9 @@ class WebFetch(Tool):
         if not url.startswith(("http://", "https://")):
             return ToolResult("只支持 http:// 或 https:// 开头的网址", is_error=True)
         try:
-            client = http_client(timeout=20.0, follow_redirects=True, headers={"user-agent": "heng-agent"})
+            client = http_client(
+                timeout=20.0, follow_redirects=True, headers={"user-agent": "heng-agent"}, proxy=ctx.proxy
+            )
             with client, client.stream("GET", url) as resp:
                 chunks, size = [], 0
                 for chunk in resp.iter_bytes():

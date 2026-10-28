@@ -24,9 +24,10 @@ import os
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from heng_agent.core.errors import AgentError
+from heng_agent.core.net import check_proxy
 
 Protocol = Literal["anthropic", "openai"]
 AuthStyle = Literal["auto", "x-api-key", "bearer"]
@@ -56,6 +57,16 @@ class Profile(BaseModel):
     prompt_cache: bool = Field(
         default=True, description="Anthropic 协议开启提示缓存：系统提示词与历史只按 0.1 倍计价（写入时 1.25 倍）"
     )
+    proxy: str | None = Field(
+        default=None,
+        description="这个服务商的请求走的代理（写法同 settings.proxy：代理地址或 direct）；不写就用 settings.proxy。"
+        "例如国外的走代理、国内的写 direct 直连",
+    )
+
+    @field_validator("proxy")
+    @classmethod
+    def _check_proxy(cls, value: str | None) -> str | None:
+        return check_proxy(value)
 
     def cost(self, usage: dict[str, int]) -> float | None:
         """按配置的价格算花费；没配价格返回 None。
@@ -124,8 +135,8 @@ def config_path(home: Path) -> Path:
 PROJECT_CONFIG = ".heng-agent/config.json"
 
 
-def _apply_config(path: Path, profiles: dict[str, Profile], default: str, *, project: bool) -> str:
-    """把一份配置文件叠加到 profiles 上，返回新的 default。
+def _apply_config(path: Path, profiles: dict[str, Profile], default: str, *, project: bool) -> tuple[str, str | None]:
+    """把一份配置文件叠加到 profiles 上，返回 (新的 default, 这份配置 settings 段里的 proxy)。
 
     preset 可以引用任何已加载的配置档（内置预设，或上一层配置文件里定义的），只写要改的字段。
     项目配置文件不许出现 api_key：项目目录可能被提交进仓库，密钥写在那里会泄露。
@@ -134,6 +145,16 @@ def _apply_config(path: Path, profiles: dict[str, Profile], default: str, *, pro
         data = json.loads(path.read_text(encoding="utf-8-sig"))
     except json.JSONDecodeError as exc:
         raise AgentError(f"{path} 不是合法 JSON：{exc}") from exc
+    settings = data.get("settings") if isinstance(data.get("settings"), dict) else {}
+    if project and ("proxy" in settings or any("proxy" in dict(p) for p in (data.get("profiles") or {}).values())):
+        # 和 api_key 同理：项目配置跟着仓库走，别人的仓库能借它把你的模型请求（连同请求头里的密钥）转到他的代理上
+        raise AgentError(
+            f"{path} 写了代理（proxy）：项目配置跟着仓库走，不能替你决定请求发到哪；代理写在用户目录的配置里"
+        )
+    try:
+        proxy = check_proxy(settings.get("proxy"))
+    except ValueError as exc:
+        raise AgentError(f"{path} 的 settings.proxy 有误：{exc}") from exc
     for name, raw in (data.get("profiles") or {}).items():
         raw = dict(raw)
         if project and "api_key" in raw:
@@ -149,7 +170,7 @@ def _apply_config(path: Path, profiles: dict[str, Profile], default: str, *, pro
             profiles[name] = Profile(**merged)
         except ValueError as exc:
             raise AgentError(f"配置档 {name} 有误：{exc}") from exc
-    return str(data.get("default", default))
+    return str(data.get("default", default)), proxy
 
 
 def load_profiles(home: Path, workdir: Path | None = None) -> tuple[dict[str, Profile], str]:
@@ -157,18 +178,24 @@ def load_profiles(home: Path, workdir: Path | None = None) -> tuple[dict[str, Pr
     最后是环境变量 HENG_AGENT_BASE_URL 等给的一次性服务商（见 env_profile），有就设为默认。
 
     多实例互不干扰：配置文件只读不写；每个实例的 --provider、/provider 切换都只在自己的内存里。
+
+    没写 proxy 的配置档用 settings.proxy（项目配置覆盖用户配置）：这样建客户端、取模型列表的各处只看 profile.proxy。
     """
     profiles = dict(PRESETS)
     default = DEFAULT_PROFILE
     layers = [(config_path(home), False)]
     if workdir is not None:
         layers.append((workdir / PROJECT_CONFIG, True))
+    settings_proxy: str | None = None
     for path, project in layers:
         if path.is_file():
-            default = _apply_config(path, profiles, default, project=project)
+            default, proxy = _apply_config(path, profiles, default, project=project)
+            settings_proxy = proxy or settings_proxy
     from_env = env_profile()
     if from_env is not None:
         profiles[ENV_PROFILE], default = from_env, ENV_PROFILE
+    if settings_proxy:
+        profiles = {n: p if p.proxy else p.model_copy(update={"proxy": settings_proxy}) for n, p in profiles.items()}
     if default not in profiles:
         raise AgentError(f"默认配置档「{default}」不存在，可选：{', '.join(profiles)}")
     return profiles, default

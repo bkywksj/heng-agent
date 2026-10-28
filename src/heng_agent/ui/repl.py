@@ -1238,7 +1238,7 @@ class Repl:
             self.console.print("本次不启动项目 MCP 服务。")
             return
         mcp_trust(self.agent.settings.home, self.agent.settings.workdir, servers)
-        manager = MCPManager(servers, self.agent.settings.workdir)
+        manager = MCPManager(servers, self.agent.settings.workdir, proxy=self.agent.settings.proxy)
         self.mcp_managers.append(manager)
         for tool in manager.tools:
             self.agent.tools[tool.name] = tool

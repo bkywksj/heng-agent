@@ -94,7 +94,9 @@ class Agent:
         self.permissions = permissions or Permissions(settings.permission_mode)
         self.session = session
         self.hooks = HookRunner(hooks or [], settings.workdir, info=self._hook_info)
-        self.ctx = ToolContext(workdir=settings.workdir, bash_timeout=settings.bash_timeout, snapshot=self._snapshot)
+        self.ctx = ToolContext(
+            workdir=settings.workdir, bash_timeout=settings.bash_timeout, proxy=settings.proxy, snapshot=self._snapshot
+        )
         self.system = build_system_prompt(settings, self.skills)
         self.seen_memory: set[str] = set()  # 已经附过的子目录 HENG.md
         self._stop_depth = 0  # stop 钩子要求继续的嵌套层数

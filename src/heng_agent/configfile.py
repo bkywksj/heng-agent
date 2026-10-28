@@ -24,8 +24,10 @@ from heng_agent.core.errors import AgentError
 SETTINGS_KEYS = (
     "permission_mode", "max_tokens", "max_rounds", "bash_timeout", "context_window", "compact_ratio", "image_preview",
     "notify_after", "mcp_tool_search", "thinking", "thinking_budget", "claude_user_config", "claude_hooks_skip",
-    "update_check",
+    "update_check", "proxy",
 )  # fmt: skip
+#: 只能写在用户配置里的设置：项目配置跟着仓库走，不能让别人的仓库替你决定请求经哪个代理发出去（读配置档时会报错说明）
+USER_ONLY_SETTINGS = ("proxy",)
 SECRET_KEYS = ("api_key",)
 
 
@@ -111,11 +113,12 @@ def settings_overrides(home: Path, workdir: Path) -> dict[str, Any]:
     用 /config set 改配置时仍由 validate_all 严格检查、抓打错的字段名。
     """
     merged: dict[str, Any] = {}
-    for path in (config_file(home, workdir, False), config_file(home, workdir, True)):
+    for project, path in ((False, config_file(home, workdir, False)), (True, config_file(home, workdir, True))):
         section = load(path).get("settings") or {}
         if not isinstance(section, dict):
             raise AgentError(f"{path} 的 settings 必须是对象")
-        merged.update({k: v for k, v in section.items() if k in SETTINGS_KEYS})
+        allowed = [k for k in SETTINGS_KEYS if not (project and k in USER_ONLY_SETTINGS)]
+        merged.update({k: v for k, v in section.items() if k in allowed})
     return merged
 
 

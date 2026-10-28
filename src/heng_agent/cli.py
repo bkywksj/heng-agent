@@ -360,7 +360,8 @@ def main(argv: list[str] | None = None) -> int:
     # 交互模式在后台连 MCP：欢迎页不用等最慢的服务（实测要 5～7 秒），用户提交第一句时再接入（Repl._sync_mcp）；
     # -p 一开始就要用工具，照旧连完再往下走
     interactive = args.prompt is None
-    manager = MCPManager(user_mcp + (project_mcp if mcp_trusted else []), settings.workdir, background=interactive)
+    servers = user_mcp + (project_mcp if mcp_trusted else [])
+    manager = MCPManager(servers, settings.workdir, background=interactive, proxy=settings.proxy)
     if args.prompt is not None:  # 交互模式由欢迎页逐行显示连接状态，这里只管非交互
         for error in manager.errors:
             print(f"⋯ {error}（跳过这个 MCP 服务）", file=sys.stderr)
