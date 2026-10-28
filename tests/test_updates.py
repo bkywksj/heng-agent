@@ -49,7 +49,8 @@ def test_offline_keeps_last_result(tmp_path: Path, monkeypatch: pytest.MonkeyPat
 def test_upgrade_commands_fall_back_to_mirror(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("HENG_AGENT_SPEC", raising=False)
     first, second = updates.upgrade_commands("uv")
-    assert first == ["uv", "tool", "install", "--force", "--upgrade", "heng-agent"]
+    # 刷新本包的缓存：否则刚发版时 uv 拿缓存的旧版本列表，升不上去
+    assert first == ["uv", "tool", "install", "--force", "--upgrade", "--refresh-package", "heng-agent", "heng-agent"]
     assert second[-2:] == ["--index-url", updates.MIRROR]
 
 

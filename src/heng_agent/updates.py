@@ -2,7 +2,8 @@
 
 - 检查：每天最多一次，在后台线程里查 PyPI（连不上换清华镜像），结果记进用户目录的 update-check.json；
   启动时只读上一次的结果、不等网络——有新版本时欢迎页提示一行。开发版不查（代码来自仓库，用 git 更新）。
-- 升级：`uv tool install --force --upgrade heng-agent`，PyPI 连不上时换清华镜像重试（和一键安装脚本一致）。
+- 升级：`uv tool install --force --upgrade --refresh-package heng-agent heng-agent`，
+  PyPI 连不上时换清华镜像重试（和一键安装脚本一致）。
 
 🔴 Windows 上不能在 heng-agent 运行时升级：它加载的文件被占用，uv 重装到一半失败（os error 32），
 还会把安装弄坏（之后一启动就 ModuleNotFoundError: heng_agent——实测过，也是以前全局 heng-agent
@@ -131,9 +132,13 @@ def check_in_background(home: Path, now: float | None = None) -> threading.Threa
 
 
 def upgrade_commands(uv: str) -> list[list[str]]:
-    """升级要依次试的命令：先默认的 PyPI，失败再换清华镜像。"""
+    """升级要依次试的命令：先默认的 PyPI，失败再换清华镜像。
+
+    带 --refresh-package：uv 会缓存 PyPI 的版本列表，刚发版的那段时间里拿缓存的旧列表，
+    说「已是最新」却装不上新版（发布 0.3.1 后本机实测）。只刷新本包，不重取全部依赖。
+    """
     spec = os.environ.get("HENG_AGENT_SPEC") or PACKAGE
-    base = [uv, "tool", "install", "--force", "--upgrade", spec]
+    base = [uv, "tool", "install", "--force", "--upgrade", "--refresh-package", PACKAGE, spec]
     return [base, [*base, "--index-url", MIRROR]]
 
 
