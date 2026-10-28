@@ -6,20 +6,25 @@
 from __future__ import annotations
 
 import re
+import threading
 import time
+from typing import Any
 
 from rich.cells import cell_len
+from rich.markdown import Markdown
 from rich.markup import escape
 from rich.panel import Panel
 
 from heng_agent import worktree
 from heng_agent.agents import create_agent, discover_agents
+from heng_agent.core import logs
 from heng_agent.core.errors import AgentError
+from heng_agent.model.client import make_client
 from heng_agent.model.thinking import EFFORT_NAME, EFFORTS
 from heng_agent.model.thinking import describe as describe_thinking
 from heng_agent.tools.background import describe
 from heng_agent.tools.subagent import SubAgentTool
-from heng_agent.ui import agents_view, terminal_setup
+from heng_agent.ui import agents_view, btw, terminal_setup
 from heng_agent.ui.doctor import report as doctor_report
 from heng_agent.ui.render import (
     _PLAIN,
@@ -200,6 +205,47 @@ class CommandsMixin:
         profile = getattr(a.client, "profile", None)
         if a.effort and profile is not None and profile.protocol == "openai" and a.effort in ("xhigh", "max"):
             c.print("[dim]OpenAI 协议只有 low / medium / high：按 high 发[/]")
+
+    def btw_command(self, rest: str) -> None:
+        """/btw 问题：旁支问题。在后台线程里问（不打断正在进行的回答），答完打印在一个框里，不进对话历史。"""
+        a, c = self.agent, self.console
+        question = rest.strip()
+        if not question:
+            c.print("用法：/btw 问题——随口问一句，不打断正在进行的回答、不进对话历史、不调工具")
+            return
+        client = self._btw_client()
+        if client is None:
+            c.print("[yellow]当前的模型客户端用不了 /btw[/]")
+            return
+        # 在界面线程里先取好快照：后台线程问的时候，正在进行的这一问可能还在往对话里加东西
+        messages, system, history = list(a.messages), a.system_prompt(), list(self._btw_log)
+        c.print("[dim]旁支问题已发出：答完显示在这里，不打断正在进行的回答，也不进对话历史[/]")
+
+        def work() -> None:
+            try:
+                answer = btw.ask(client, system, messages, history, question)
+            except Exception as exc:  # 网络、服务报错：说一声，别让后台线程带着异常悄悄退出
+                logs.log.warning("/btw 出错：%s", exc)
+                self._btw_show(f"[red]旁支问题没问成：{escape(str(exc))}[/]")
+                return
+            title = question if len(question) <= 40 else question[:39] + "…"
+            self._btw_show(Panel(Markdown(answer or "（没有回答）"), title=f"[bold]旁支问题：{escape(title)}[/]",
+                                 subtitle="[dim]不进对话历史[/]", border_style="magenta", padding=(0, 1)))  # fmt: skip
+            self._btw_log.append((question, answer))  # 显示之后再记：记上了就表示已经显示出来
+
+        threading.Thread(target=work, name="heng-btw", daemon=True).start()
+
+    def _btw_client(self) -> Any:
+        """/btw 单独用一个模型客户端：正在进行的那一问还在用原来的，共用的话 ESC 打断主回答会把它也取消。测试里换掉。"""
+        profile = getattr(self.agent.client, "profile", None)
+        return make_client(profile, self.agent.settings.max_tokens) if profile is not None else None
+
+    def _btw_show(self, renderable: Any) -> None:
+        """把旁支问题的回答显示出来（后台线程里调）：回答中经输入框打印到上方；平时输入框开着就收起来打印。"""
+        box = self._box
+        if box is not None and box.turn is None and box.print_above(lambda: self.console.print(renderable)):
+            return
+        self.console.print(renderable)  # 回答中 console 是写到输入框上方的那个；没有输入框就直接打印
 
     def tasks_command(self, rest: str) -> None:
         """/tasks：列出后台任务；/tasks kill 任务号：停掉。"""

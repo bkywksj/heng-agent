@@ -30,6 +30,7 @@ BUILTIN_HELP = {
     "tasks": "后台任务（/tasks kill 任务号 停止）",
     "think": "思考模式开关（on / off / 预算 / show）",
     "effort": "思考强度（low / medium / high / xhigh / max / auto）",
+    "btw": "旁支问题：随口问一句，不打断回答、不进对话历史",
     "agents": "自定义子智能体角色（new 名字 新建）",
     "worktree": "git 工作树（new / switch / remove）",
     "terminal-setup": "让 Windows Terminal 的 Shift+Enter 能换行",
@@ -101,7 +102,7 @@ NO_ARGS = frozenset({"help", "clear", "undo", "todo", "cost", "skills", "rewind"
                      "doctor", "exit", "quit", "terminal-setup", "usage", "status", "stats", "hooks", "todos",
                      "version", "bashes"})  # fmt: skip
 #: 必须带参数的命令：Enter 只补全（加空格等你输参数），不执行
-REQUIRES_ARGS = frozenset({"rename"})
+REQUIRES_ARGS = frozenset({"rename", "btw"})
 #: 参数提示：(命令, 前面已输入的参数) → [(候选, 说明, 选它之后还要不要再输)]
 ArgHints = Callable[[str, list[str]], list[tuple[str, str, bool]]]
 

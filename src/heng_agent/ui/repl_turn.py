@@ -34,7 +34,7 @@ LIVE_MAX_LINES = 12
 #: 回答中也马上执行的命令：只看状态、或改下一次请求才生效的设置（同 Claude Code：/status、/usage、/tasks、/effort……）。
 #: 别的命令（会动对话、切服务商、要你选东西的）排队，这一问结束后执行
 INSTANT_COMMANDS = frozenset({"status", "usage", "cost", "stats", "tasks", "bashes", "context", "todos",
-                              "effort", "think"})  # fmt: skip
+                              "effort", "think", "btw"})  # fmt: skip
 
 
 class _AboveWriter(io.TextIOBase):
