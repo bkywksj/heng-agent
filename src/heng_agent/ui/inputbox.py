@@ -17,6 +17,7 @@ from collections.abc import Callable, Iterable
 from pathlib import Path
 
 from prompt_toolkit.application import Application, get_app, run_in_terminal
+from prompt_toolkit.application.current import set_app
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.completion import CompleteEvent, Completer, Completion, merge_completers
 from prompt_toolkit.document import Document
@@ -331,6 +332,24 @@ class InputBox:
         app = self.app
         if app is not None:
             app.invalidate()
+
+    def print_above(self, func: Callable[[], object]) -> bool:
+        """输入框开着时，在界面线程里把输入框收起、调 func 打印、再画回来（输出留在输入框上方）。
+
+        可以在别的线程里调：通过事件循环转到界面线程执行，func 运行时主线程正停在输入框里、没有别的事在做。
+        返回是否已安排；输入框没开着（模型正在回答、或在别的提问里）返回 False，由调用方另找时机打印。
+        """
+        app = self.app
+        loop = app.loop if app is not None else None
+        if app is None or loop is None or not app.is_running:
+            return False
+
+        def schedule() -> None:
+            with set_app(app):  # run_in_terminal 用 get_app() 找界面：事件循环的回调里要先设好
+                run_in_terminal(func)
+
+        loop.call_soon_threadsafe(schedule)
+        return True
 
     def prompt(self, default: str = "") -> str:
         """default：预填进输入框的文字（/rewind 之后把那一问放回来编辑重发）。"""

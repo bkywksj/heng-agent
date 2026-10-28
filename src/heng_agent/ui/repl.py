@@ -236,9 +236,16 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin):
         if self._box is not None:
             self._box.refresh()
 
+    def _mcp_connected(self) -> None:
+        """后台 MCP 连完（连接线程里调）：输入框正开着就把每个服务的结果打印到它上方、工具接进来
+        （以前只更新状态栏，用户回答得快、输入框先出来时，看不到连了哪些服务）；没开着就等下次显示输入框前再接。"""
+        box = self._box
+        if box is None or not box.print_above(lambda: self._sync_mcp(wait=False)):
+            self._refresh_input()
+
     def watch_mcp(self, manager: MCPManager) -> None:
         """后台连接的 MCP 管理器：连接中每 0.1 秒重画一次输入框（状态栏的转圈与进度动起来），连完再重画一次。"""
-        manager.on_done(self._refresh_input)
+        manager.on_done(self._mcp_connected)
         if manager.ready:
             return
 

@@ -255,3 +255,43 @@ def test_ready_servers_are_reported_before_input_without_waiting(tmp_path: Path,
     text = console.export_text()
     assert "MCP：2 个服务已连接 · 2 个工具，1 个连不上，用时" in text and "mcp__first__first_tool" in repl.agent.tools
     manager.close()
+
+
+def test_connected_while_input_open_prints_above_or_waits(tmp_path: Path, gate: threading.Event) -> None:
+    """连完时输入框开着：交给输入框打印到它上方（以前只更新状态栏，用户回答得快时看不到连了哪些服务）；
+    输入框没开着：不打印，等下次显示输入框前再接。"""
+    manager = MCPManager(_configs(), tmp_path, background=True)
+    repl, console = _repl(tmp_path, manager)  # 建界面时还在连（真实启动也是这样）
+    gate.set()
+    assert manager.wait(5)
+
+    class Box:
+        def __init__(self, running: bool) -> None:
+            self.running, self.funcs, self.refreshed = running, [], 0
+
+        def print_above(self, func: Any) -> bool:
+            if self.running:
+                self.funcs.append(func)
+            return self.running
+
+        def refresh(self) -> None:
+            self.refreshed += 1
+
+    closed = Box(running=False)
+    repl._box = closed  # type: ignore[assignment]
+    repl._mcp_connected()
+    assert closed.refreshed == 1 and "mcp__first__first_tool" not in repl.agent.tools
+    open_box = Box(running=True)
+    repl._box = open_box  # type: ignore[assignment]
+    repl._mcp_connected()
+    open_box.funcs[0]()  # 输入框在界面线程里调它
+    assert 'MCP 服务 "first" 已连接' in console.export_text() and "mcp__first__first_tool" in repl.agent.tools
+    manager.close()
+
+
+def test_print_above_needs_a_running_input_box() -> None:
+    from heng_agent.ui.inputbox import InputBox
+
+    box = InputBox.__new__(InputBox)
+    box.app = None
+    assert box.print_above(lambda: None) is False
