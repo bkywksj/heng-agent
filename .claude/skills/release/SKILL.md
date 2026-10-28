@@ -21,9 +21,11 @@ description: |
 ## 发布步骤
 
 1. **先确认没有别的会话在改**：`git status`、`git log --oneline -5`；
-2. **改版本号两处**：`pyproject.toml` 的 `version`、`src/heng_agent/__init__.py` 的 `__version__`（有测试检查两处一致）。
+2. **改版本号两处，再更新锁文件**：`pyproject.toml` 的 `version`、`src/heng_agent/__init__.py` 的 `__version__`，
+   然后运行 `uv lock`（uv.lock 里记着本项目的版本）、再 `uv sync --extra dev`（不加 --extra 会把 pytest、ruff 卸掉）。
    版本号规则：修 bug 加最后一位（0.2.1），加功能加中间一位（0.3.0）；
-3. **写 CHANGELOG.md**：最上面加一节，按「交互 / 扩展 / 兼容 / 安全 / 修复」分类写用户看得见的变化；
+3. **写 CHANGELOG.md**：最上面加一节（`## x.y.z（日期）`），按「交互 / 扩展 / 兼容 / 安全 / 修复」分类写用户看得见的变化。
+   `tests/test_version.py` 检查四处一致：两处版本号、uv.lock、CHANGELOG 最新一节——漏了哪个测试就挂（以前 uv.lock 一直没人改）；
 4. **检查**：`ruff format`、`ruff check`、全部测试通过；
 5. **提交并打标签**：逐个 `git add`，提交信息「发布 x.y.z」；`git tag -a vx.y.z -m "…"`；
 6. **推送**：Sigil 的 `git_push`，分支与标签各推一次、两个远程：`origin`（GitHub，凭据 `github1`）与 `gitee`（Gitee 镜像，凭据 `gitee`）。

@@ -53,3 +53,21 @@ def test_version_matches_pyproject() -> None:
 
     pyproject = version.source_root() / "pyproject.toml"  # type: ignore[operator]
     assert tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]["version"] == __version__  # 两处要一起改
+
+
+def test_uv_lock_matches_version() -> None:
+    """发版时改了版本号要跟着 uv lock：以前没人记得，v0.3.2 标签里 uv.lock 记的还是 0.2.0。"""
+    import tomllib
+
+    lock = tomllib.loads((version.source_root() / "uv.lock").read_text(encoding="utf-8"))  # type: ignore[operator]
+    ours = next(p for p in lock["package"] if p["name"] == "heng-agent")
+    assert ours["version"] == __version__, "改了版本号后运行 uv lock，把 uv.lock 一起提交"
+
+
+def test_changelog_has_current_version_on_top() -> None:
+    """CHANGELOG 最新一节要是当前版本：漏写的话 GitHub Release 的说明会悄悄变成「见 CHANGELOG.md」。"""
+    import re
+
+    text = (version.source_root() / "CHANGELOG.md").read_text(encoding="utf-8")  # type: ignore[operator]
+    newest = re.search(r"^## (\d+\.\d+\.\d+)", text, re.MULTILINE)
+    assert newest is not None and newest.group(1) == __version__, "改了版本号后在 CHANGELOG.md 最上面写这个版本的一节"

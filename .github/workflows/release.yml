@@ -9,21 +9,28 @@ on:
     tags: ["v*"]
 
 jobs:
+  # 和日常 CI（ci.yml）同一套：三个平台 × Python 3.11 / 3.13、代码检查。以前这里只用 3.12、不跑 ruff，
+  # 发布前的检查反而比平时少
   test:
-    name: 测试 · ${{ matrix.os }}
+    name: 测试 · ${{ matrix.os }} · Python ${{ matrix.python }}
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         os: [windows-latest, ubuntu-latest, macos-latest]
+        python: ["3.11", "3.13"]
     env:
       PYTHONIOENCODING: utf-8
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python }}
       - run: uv sync --extra dev
-      - run: uv run python -m pytest -q
+      - name: 代码检查
+        run: |
+          uv run ruff format --check src tests
+          uv run ruff check src tests
+      - run: uv run python -m pytest -q  # 含 uv.lock、CHANGELOG 与版本号一致的检查（tests/test_version.py）
 
   build:
     name: 构建
@@ -39,6 +46,15 @@ jobs:
           version=$(grep -m1 '^version = ' pyproject.toml | cut -d'"' -f2)
           if [ "$tag" != "$version" ]; then
             echo "::error title=版本号不一致::标签是 v$tag，pyproject.toml 里是 $version——先改版本号再打标签"
+            exit 1
+          fi
+      - name: CHANGELOG 要有这个版本的一节
+        # 发布到 PyPI 之前查：以前到最后建 GitHub Release 时才发现没写，只能悄悄填「见 CHANGELOG.md」，包已经发出去了
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if ! grep -Eq "^## ${version//./\\.}([ （(]|$)" CHANGELOG.md; then
+            echo "::error title=CHANGELOG 漏写::CHANGELOG.md 里没有「## $version」这一节——写上再打标签"
             exit 1
           fi
       - run: uv build  # 源码包与 wheel
