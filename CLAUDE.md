@@ -17,17 +17,25 @@ heng-agent 是类似 Claude Code 的**终端编码智能体**：读代码、改�
 ## 🔴 分层规则
 
 ```
-cli                 命令行入口
-ui                  终端界面、斜杠命令、权限确认对话
+cli | acp_server    命令行入口 | 编辑器协议入口（ACP）
+ui                  终端界面、斜杠命令、权限确认对话（见下）
 agent               对话循环：模型 → 工具 → 结果喂回
-context | session | permissions | compaction | commands | hooks | mcp
-tools               内置工具（含 todo、web_fetch、skill、task 子智能体）与路径安全
+context | session | permissions | compaction | commands | hooks | mcp | agents | configfile | attachments | updates | worktree
+tools               内置工具（含 todo、web_fetch、skill、task 子智能体、exit_plan_mode）与路径安全
 model               模型客户端（协议、流式解析、服务商配置档）
 core                消息与事件的数据类型、配置、错误、信任记录
 ```
 
 上层只能引用下层，同一行 `|` 两边互不引用。`agent` 不认识具体的界面：权限确认、输出显示都通过回调注入，
 这样同一个循环既能跑交互界面，也能跑 `-p` 非交互模式和测试。
+
+`ui/repl.py` 只放主循环、命令分发、事件渲染、欢迎页与输入框；其余按职责拆成 `Repl` 继承的 mixin：
+`approval`（确认对话、交计划）、`repl_mcp`（/mcp、后台连接接入）、`repl_session`（/resume /rewind /context /model）、
+`repl_memory`（# 与 /memory）、`repl_commands`（/worktree /agents /think /tasks /doctor copy……）；
+显示用的函数在 `render`。新的子命令按职责放进对应的 mixin，别再往 repl.py 里堆。
+🔴 mixin 模块只能从 `render` 导入、不能导入 `repl`（repl 继承它们，会循环引用）；
+测试里 monkeypatch 模块级函数（`copy_text`、`list_models`、`edit_in_editor`……）要打在**调用它的那个模块**上，
+打在 repl 上不生效——`edit_in_editor` 没替换掉的话测试会真的打开编辑器卡住。
 
 ## 🔴 安全底线
 
