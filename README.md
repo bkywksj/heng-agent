@@ -32,6 +32,10 @@ uv tool uninstall heng-agent    # 卸载
 从源码装：`git clone` 本仓库后，在仓库目录里 `uv tool install .`。
 装完如果提示「not on your PATH」，运行一次 `uv tool update-shell` 再重开终端。
 
+**第一次运行**会引导你配置模型服务：先自动找电脑上现成的配置（环境变量里的 `DEEPSEEK_API_KEY` 等密钥、
+Claude Code 里配的中转站），能一键用上；没有就选服务商、填密钥。配好后自动测一下连接，失败会说清楚原因
+（密钥不对、余额不足、连不上）。随时可以用 `/config provider` 修改。
+
 ### 平台支持
 
 主要在 Windows（Windows Terminal）上开发与测试；macOS、Linux 上核心功能（对话、工具、MCP、钩子、会话……）
