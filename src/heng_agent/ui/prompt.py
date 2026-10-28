@@ -70,6 +70,9 @@ STYLE = Style.from_dict(
         "bar.ctx-hot": "bold #e06c75",
         "bar.background": "bold #e5c07b",
         "bar.thinking": "bold #c678dd",
+        "bar.mcp": "#98c379",
+        "bar.mcp-wait": "#e5c07b",
+        "bar.mcp-fail": "bold #e06c75",
         # 补全菜单：深色底、选中项用强调色整行高亮、说明文字灰色，滚动条与底色协调
         "completion-menu": "bg:#21252b",
         "completion-menu.completion": "bg:#21252b #abb2bf",
@@ -145,7 +148,8 @@ def human_tokens(n: int) -> str:
 
 
 def toolbar(mode: str, model: str, workdir: str, used: int, window: int, background: int = 0, *,
-            thinking: bool = False, compact_ratio: float = 0.8) -> FormattedText:  # fmt: skip
+            thinking: bool = False, compact_ratio: float = 0.8,
+            mcp: tuple[str, str] | None = None) -> FormattedText:  # fmt: skip
     pct = used / window * 100 if window else 0.0
     threshold = compact_ratio * 100
     mode_style = {"auto": "class:bar.mode-auto", "plan": "class:bar.mode-plan"}.get(mode, "class:bar.mode")
@@ -158,6 +162,8 @@ def toolbar(mode: str, model: str, workdir: str, used: int, window: int, backgro
     ]
     if thinking:
         parts.append(("class:bar.thinking", "  ✻ 思考"))
+    if mcp:  # MCP 连接情况：(样式, 文字)，见 mcp_view.toolbar_part
+        parts.append(mcp)
     parts += [
         ("class:bar.dim", f"  {short_dir}  "),
         (ctx_style, f"上下文 {pct:.0f}%（{human_tokens(used)}/{human_tokens(window)}）"),

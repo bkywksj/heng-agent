@@ -114,6 +114,7 @@ class InputBox:
         self.history = history
         self.completer = merge_completers([commands, PathCompleter(workdir)])
         self.toolbar = toolbar
+        self.app: Application[str] | None = None  # 正在显示的输入框（prompt 期间），refresh 用
         self.get_mode, self.set_mode, self.modes = get_mode, set_mode, modes
         self.style = style
         self.input, self.output = input, output
@@ -325,6 +326,12 @@ class InputBox:
         )
         return root, body
 
+    def refresh(self) -> None:
+        """叫正在显示的输入框重画（状态栏内容变了时）。可以在别的线程里调：invalidate 是线程安全的。"""
+        app = self.app
+        if app is not None:
+            app.invalidate()
+
     def prompt(self, default: str = "") -> str:
         """default：预填进输入框的文字（/rewind 之后把那一问放回来编辑重发）。"""
         enable_shift_enter()  # Windows 上让 Shift+Enter 换行（重复调用无副作用）
@@ -349,7 +356,11 @@ class InputBox:
         # 看后面跟不跟键——两次 ESC 各被拖近 1 秒，间隔超出双击窗口，双击 ESC 就认不出来（实测卡住）
         app.timeoutlen = KEY_SEQUENCE_TIMEOUT
         # 历史是异步加载的：PromptSession 会自己触发，这里手搭的 Application 要主动做，否则上箭头取不到历史
-        text = app.run(pre_run=buffer.load_history_if_not_yet_loaded)
+        self.app = app
+        try:
+            text = app.run(pre_run=buffer.load_history_if_not_yet_loaded)
+        finally:
+            self.app = None
         if text.strip():
             buffer.append_to_history()
         return text

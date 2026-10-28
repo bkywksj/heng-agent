@@ -171,3 +171,41 @@ def test_repl_syncs_even_if_connected_before_banner(tmp_path: Path, slow_open: l
     assert "mcp__first__first_tool" in repl.agent.tools
     assert console.export_text().count("MCP：2 个服务已连接") == 1  # 欢迎页已经显示过，不重复打印
     manager.close()
+
+
+def test_toolbar_shows_live_mcp_status_and_wakes_input(tmp_path: Path, gate: threading.Event) -> None:
+    """以前后台连好了也看不出来：欢迎页写着「后台连接中」，要发出下一句才打印结果（用户反馈「看不到 MCP 的连接情况」）。
+    现在状态栏按实时状态显示，连完时叫醒正开着的输入框重画，不用等用户提交。"""
+    from heng_agent.ui import mcp_view
+
+    manager = MCPManager(_configs(), tmp_path, background=True)
+    repl, _ = _repl(tmp_path, manager)
+    woke = threading.Event()
+    manager.on_done(woke.set)
+    assert mcp_view.toolbar_part(repl) == ("class:bar.mcp-wait", "  MCP 连接中 0/3")
+    gate.set()
+    assert woke.wait(5)  # 连完（不论成败）回调一次，不用等用户提交输入
+    assert mcp_view.toolbar_part(repl) == ("class:bar.mcp-fail", "  MCP 2/3 · 1 个连不上")  # 还没 _sync_mcp 也是实时的
+    called: list[int] = []
+    manager.on_done(lambda: called.append(1))  # 已经连完再登记：立刻调
+    assert called == [1]
+    manager.close()
+
+
+def test_toolbar_mcp_part_absent_without_servers(tmp_path: Path) -> None:
+    from heng_agent.ui import mcp_view
+    from heng_agent.ui.prompt import toolbar
+
+    manager = MCPManager([], tmp_path, background=True)
+    repl, _ = _repl(tmp_path, manager)
+    assert mcp_view.toolbar_part(repl) is None
+    bar = "".join(t for _, t in toolbar("ask", "m", "w", 0, 1, mcp=("class:bar.mcp", "  MCP 6")))
+    assert "MCP 6" in bar
+
+
+def test_input_box_refresh_is_noop_when_closed(tmp_path: Path) -> None:
+    from heng_agent.ui.inputbox import InputBox
+
+    box = InputBox.__new__(InputBox)
+    box.app = None
+    box.refresh()  # 输入框没开着（模型正在回答）时连完：什么都不做，不报错

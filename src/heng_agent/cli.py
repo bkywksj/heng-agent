@@ -452,6 +452,7 @@ def _main(argv: list[str] | None = None) -> int:
             onboarding=needs_onboarding(settings.home) and not args.provider,
         )
         repl.mcp_managers.insert(0, manager)  # /mcp reconnect / disable 要找得到用户配置里的服务
+        manager.on_done(repl._refresh_input)  # 后台连完时输入框若开着，状态栏立刻显示结果
         try:
             return repl.loop()
         finally:

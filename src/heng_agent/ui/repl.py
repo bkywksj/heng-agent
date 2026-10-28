@@ -229,7 +229,12 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin):
         a = self.agent
         return toolbar(a.permissions.mode, self._model_label(), str(a.settings.workdir), a.last_input_tokens,
                        a.context_window, len(a.ctx.tasks.running()), thinking=a.thinking,
-                       compact_ratio=a.settings.compact_ratio)  # fmt: skip
+                       compact_ratio=a.settings.compact_ratio, mcp=mcp_view.toolbar_part(self))  # fmt: skip
+
+    def _refresh_input(self) -> None:
+        """后台 MCP 连完时（连接线程里调）：输入框正开着就重画，状态栏立刻显示连上了几个。"""
+        if self._box is not None:
+            self._box.refresh()
 
     def _set_mode(self, mode: str) -> None:
         self.agent.permissions.mode = mode  # type: ignore[assignment]

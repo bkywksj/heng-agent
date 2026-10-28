@@ -127,6 +127,29 @@ def counts(repl: Repl) -> tuple[int, int, int]:
     return len(ok), tools, failed
 
 
+def toolbar_part(repl: Repl) -> tuple[str, str] | None:
+    """状态栏里的 MCP 一段：(样式, 文字)；没配 MCP 返回 None。
+
+    以前后台连接时欢迎页只写「后台连接中」，连好了也要等用户发出下一句才打印结果，看着像一直没连上。
+    状态栏按管理器的实时状态显示（后台连完时界面会被叫醒重画，见 Repl._refresh_input）。
+    """
+    live: dict[str, tuple[bool, str]] = {}
+    for manager in repl.mcp_managers:
+        if manager.ready:  # 连完了才读它的状态，不和连接线程抢着读写
+            live.update({name: (good, detail) for name, good, detail in manager.status})
+    entries = [(name, *live.get(name, (good, detail))) for name, good, detail in repl.mcp_status]
+    entries = [e for e in entries if e[0] not in repl.mcp_disabled]
+    if not entries:
+        return None
+    waiting = sum(1 for _, good, detail in entries if not good and detail == CONNECTING)
+    ok = sum(1 for _, good, _ in entries if good)
+    if waiting:
+        return "class:bar.mcp-wait", f"  MCP 连接中 {ok}/{len(entries)}"
+    if ok < len(entries):
+        return "class:bar.mcp-fail", f"  MCP {ok}/{len(entries)} · {len(entries) - ok} 个连不上"
+    return "class:bar.mcp", f"  MCP {ok}"
+
+
 def connecting(repl: Repl) -> list[str]:
     """还在后台连接的服务名。"""
     return [name for name, good, detail in repl.mcp_status if not good and detail == CONNECTING]

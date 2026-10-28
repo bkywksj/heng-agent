@@ -25,6 +25,7 @@ import queue
 import re
 import subprocess
 import threading
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -395,6 +396,8 @@ class MCPManager:
         #: 每个服务的连接状态：(名字, 是否连上, 工具数与连接方式或失败原因)，欢迎页逐行显示
         self.status: list[tuple[str, bool, str]] = []
         self._done = threading.Event()
+        self._done_lock = threading.Lock()  # 登记回调与「连完了」之间不漏掉：见 on_done
+        self._callbacks: list[Callable[[], None]] = []
         self._thread: threading.Thread | None = None
         #: 是否后台连接：是的话工具要由界面在连完后接进智能体（构造时还没有）
         self.background = background and bool(servers)
@@ -414,7 +417,22 @@ class MCPManager:
             for config, result in zip(servers, opened, strict=True):
                 self._register(config, result)
         finally:
-            self._done.set()
+            with self._done_lock:
+                self._done.set()
+                callbacks, self._callbacks = self._callbacks, []
+            for callback in callbacks:
+                try:
+                    callback()
+                except Exception:  # 回调是界面刷新之类的小事，出错不能让连接线程带着异常退出
+                    logs.log.exception("MCP 连完后的回调出错")
+
+    def on_done(self, callback: Callable[[], None]) -> None:
+        """连完（不论成败）后调一次 callback；已经连完就立刻调。后台连接时在连接线程里调，callback 要线程安全。"""
+        with self._done_lock:
+            if not self._done.is_set():
+                self._callbacks.append(callback)
+                return
+        callback()
 
     @property
     def ready(self) -> bool:
