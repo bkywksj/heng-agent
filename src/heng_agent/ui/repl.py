@@ -39,6 +39,7 @@ from heng_agent.core.version import is_dev, version_label
 from heng_agent.hooks import Hook
 from heng_agent.hooks import trust as trust_hooks
 from heng_agent.mcp import MCPManager, ServerConfig
+from heng_agent.model import quota
 from heng_agent.model.client import make_client
 from heng_agent.model.providers import load_profiles
 from heng_agent.session import SessionStore
@@ -172,6 +173,8 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin):
         self._bar_git = statusline.Background(on_change=self._refresh_input)
         self._bar_custom = statusline.Background(on_change=self._refresh_input)
         self._bar_command = statusline.load_command(agent.settings)
+        self._bar_quota = statusline.Background(on_change=self._refresh_input)
+        self._quota_for: tuple[str, float] = ("", 0.0)  # (查的是哪个服务地址, 什么时候查的)：换服务商或过 3 分钟再查
         self._status: Any = None  # 等待动画（rich Status）
         self._event_lock = threading.RLock()
         self._live: Live | None = None  # 正在流式渲染的一段 Markdown
@@ -238,7 +241,19 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin):
         return toolbar(a.permissions.mode, self._model_label(), str(a.settings.workdir), a.last_input_tokens,
                        a.context_window, len(a.ctx.tasks.running()), thinking=a.thinking,
                        compact_ratio=a.settings.compact_ratio, mcp=mcp_view.toolbar_part(self), branch=branch,
-                       dirty=dirty, speed=a.last_speed, width=width, custom=self._custom_line())  # fmt: skip
+                       dirty=dirty, speed=a.last_speed, width=width, custom=self._custom_line(),
+                       quota=self._quota_part())  # fmt: skip
+
+    def _quota_part(self) -> tuple[str, str] | None:
+        found = self._bar_quota.value
+        if found is None or self._quota_for[0] != self._profile_url():
+            return None  # 还没查到，或刚换了服务商、查到的是上一个的
+        style = {"warn": "class:bar.ctx-warn", "hot": "class:bar.ctx-hot"}.get(found.level, "class:bar.quota")
+        return style, found.text
+
+    def _profile_url(self) -> str:
+        profile = getattr(self.agent.client, "profile", None)
+        return getattr(profile, "base_url", "") or ""
 
     def _custom_line(self) -> list[tuple[str, str]] | None:
         """用户状态栏命令的输出（还没跑完第一次时 None：先显示内置的第一行）；出错的说明用红字。"""
@@ -252,6 +267,13 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin):
         a = self.agent
         workdir = a.settings.workdir
         self._bar_git.refresh(lambda: statusline.git_state(workdir))
+        profile = getattr(a.client, "profile", None)
+        url = self._profile_url()
+        if profile is not None and url and (url != self._quota_for[0] or time.monotonic() - self._quota_for[1] > 180):
+            # 额度：每 3 分钟最多查一次（和 tauri-cc 的缓存一样），换了服务商立刻查
+            self._quota_for = (url, time.monotonic())
+            key, proxy = profile.resolve_key(), getattr(profile, "proxy", None)
+            self._bar_quota.refresh(lambda: quota.fetch(url, key, proxy=proxy))
         command = self._bar_command
         if command:
             data = statusline.payload(

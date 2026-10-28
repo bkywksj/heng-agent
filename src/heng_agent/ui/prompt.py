@@ -71,6 +71,7 @@ STYLE = Style.from_dict(
         "bar.branch": "#98c379",
         "bar.sep": "#4b5263",
         "bar.ctx-warn": "#e5c07b",
+        "bar.quota": "#56b6c2",
         "bar.model": "#c678dd",
         "bar.dim": "#7f848e",
         "bar.ctx": "#98c379",
@@ -78,7 +79,7 @@ STYLE = Style.from_dict(
         "bar.background": "bold #e5c07b",
         "bar.thinking": "bold #c678dd",
         "bar.mcp": "#98c379",
-        "bar.mcp-wait": "#e5c07b",
+        "bar.mcp-wait": "#d19a66",
         "bar.mcp-fail": "bold #e06c75",
         # 补全菜单：深色底、选中项用强调色整行高亮、说明文字灰色，滚动条与底色协调
         "completion-menu": "bg:#21252b",
@@ -179,7 +180,8 @@ def context_bar(used: int, window: int, threshold: float) -> tuple[str, str]:
 def toolbar(mode: str, model: str, workdir: str, used: int, window: int, background: int = 0, *,
             thinking: bool = False, compact_ratio: float = 0.8, mcp: tuple[str, str] | None = None,
             branch: str | None = None, dirty: bool = False, speed: float | None = None, width: int | None = None,
-            custom: list[tuple[str, str]] | None = None) -> FormattedText:  # fmt: skip
+            custom: list[tuple[str, str]] | None = None,
+            quota: tuple[str, str] | None = None) -> FormattedText:  # fmt: skip
     """输入框下面的两行状态栏。
 
     第一行是信息：项目名、git 分支、模型、MCP、上一次的输出速度、上下文进度条；第二行是权限模式与提醒。
@@ -194,21 +196,21 @@ def toolbar(mode: str, model: str, workdir: str, used: int, window: int, backgro
         line2.append((mcp[0], " · " + mcp[1].strip()))
     line1 = custom if custom is not None else info_line(
         model, workdir, used, window, thinking=thinking, threshold=threshold, mcp=mcp, branch=branch, dirty=dirty,
-        speed=speed, width=width,
+        speed=speed, width=width, quota=quota,
     )  # fmt: skip
     return FormattedText([*line1, ("", "\n"), *line2])
 
 
 def info_line(model: str, workdir: str, used: int, window: int, *, thinking: bool, threshold: float,
               mcp: tuple[str, str] | None, branch: str | None, dirty: bool, speed: float | None,
-              width: int | None) -> list[tuple[str, str]]:  # fmt: skip
+              width: int | None, quota: tuple[str, str] | None = None) -> list[tuple[str, str]]:  # fmt: skip
     pct = used / window * 100 if window else 0.0
     name = Path(workdir).name or workdir  # 完整路径欢迎页里有；这里只放项目名，省出地方
     ctx_style, bar = context_bar(used, window, threshold)
     short_model = model.rsplit(" · ", 1)[-1]  # 「yongye · claude-sonnet-5」窄了只留模型名
-    # 依次去掉的东西：每一步在前一步的基础上再少一样
-    steps = [set(), {"speed"}, {"speed", "branch"}, {"speed", "branch", "provider"},
-             {"speed", "branch", "provider", "tokens"}, {"speed", "branch", "provider", "tokens", "bar"}]  # fmt: skip
+    # 依次去掉的东西：每一步在前一步的基础上再少一样（额度最先去：可有可无，且长度不定）
+    order = ["quota", "speed", "branch", "provider", "tokens", "bar"]
+    steps = [set(order[:n]) for n in range(len(order) + 1)]
     parts: list[tuple[str, str]] = []
     for drop in steps:
         parts = [("class:bar.project", f" ▣ {name}")]
@@ -224,6 +226,8 @@ def info_line(model: str, workdir: str, used: int, window: int, *, thinking: boo
         ctx = "上下文" if "bar" in drop else f"上下文 {bar}"
         ctx += f" {pct:.0f}%" + ("" if "tokens" in drop else f" {human_tokens(used)}/{human_tokens(window)}")
         parts += [SEP, (ctx_style, ctx)]
+        if quota and "quota" not in drop:  # 服务商的额度 / 余额：(样式, 文字)，见 model.quota
+            parts += [SEP, quota]
         if width is None or cell_len("".join(t for _, t in parts)) < width:
             break
     return parts
