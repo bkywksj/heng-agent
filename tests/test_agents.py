@@ -131,3 +131,53 @@ def test_agents_command(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
     repl.handle_command("/agents")
     shown = console.export_text()
     assert "没有自定义角色" in shown and "测试员" in shown and "会改动" in shown
+
+
+LONG = ("Expert debugger specialized in deep code execution flow analysis and root cause investigation. "
+        "Use when you need to analyze code execution paths, build execution chain diagrams, trace variable "
+        "state changes, or perform deep root cause analysis.")  # fmt: skip
+
+
+def _roles_repl(tmp_path: Path, width: int = 100) -> tuple[Repl, Console]:
+    work = tmp_path / "w"
+    roles = work / ".heng-agent" / "agents"
+    roles.mkdir(parents=True)
+    (roles / "bug-analyzer.md").write_text(
+        f"---\ndescription: {LONG}\n"
+        "tools: read_file, grep, write_file, run_bash_command, search_files\n---\n你是排查员。",
+        encoding="utf-8",
+    )
+    (roles / "审查员.md").write_text("---\ndescription: 审查改动。只读。\n---\n你是审查员。", encoding="utf-8")
+    console = Console(record=True, width=width, force_terminal=False)
+    return Repl(Agent(Settings(workdir=work, home=tmp_path / "h"), FakeModel([])), console=console), console
+
+
+def test_agents_overview_one_line_per_role(tmp_path: Path) -> None:
+    """以前每个角色平铺完整描述、工具、路径、被忽略的工具，长描述一折就是好几行，满屏都乱（用户反馈）。"""
+    repl, console = _roles_repl(tmp_path)
+    repl.handle_command("/agents")  # 测试里选择器用不了，走纯文字总览
+    shown = console.export_text()
+    lines = shown.splitlines()
+    assert "2 个（只读 1 · 会改动 1）" in lines[0]
+    rows = [ln for ln in lines if "bug-analyzer" in ln or "审查员" in ln]
+    assert len(rows) == 2  # 一个角色一行，不折行
+    bug = next(ln for ln in rows if "bug-analyzer" in ln)
+    assert "Expert debugger" in bug and bug.rstrip().endswith("个工具") and "Use when" not in bug  # 第一句截到一行内
+    assert "· 忽略 2 个工具" in bug and "run_bash_command" not in shown  # 总览只标个数
+    assert "项目" in bug and "会改动" in bug
+    assert all(len(ln) <= 100 for ln in lines)
+
+
+def test_agents_detail_by_name_and_by_picking(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repl, console = _roles_repl(tmp_path)
+    repl.handle_command("/agents bug-analyzer")  # 直接看详情
+    detail = console.export_text()
+    flat = " ".join(detail.split())
+    assert "perform deep root cause analysis." in flat  # 完整描述
+    assert "工具 read_file, grep, write_file" in flat and "忽略 run_bash_command, search_files" in flat
+    assert "bug-analyzer.md" in flat
+    monkeypatch.setattr(repl, "_choose", lambda title, options: "审查员")  # 方向键选中一个
+    repl.handle_command("/agents")
+    assert "审查改动。只读。" in console.export_text()
+    repl.handle_command("/agents 不存在")
+    assert "没有叫 不存在 的角色" in console.export_text()

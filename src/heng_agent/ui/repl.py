@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from prompt_toolkit.history import FileHistory
+from rich.cells import cell_len
 from rich.console import Console
 from rich.live import Live
 from rich.markdown import Markdown
@@ -57,7 +58,7 @@ from heng_agent.tools.shell import clip, run_command, shell_argv
 from heng_agent.tools.skill import skill_source
 from heng_agent.tools.subagent import SubAgentTool
 from heng_agent.tools.todo import render as render_todos
-from heng_agent.ui import info, mcp_view, terminal_setup
+from heng_agent.ui import agents_view, info, mcp_view, terminal_setup
 from heng_agent.ui.config_cmd import ConfigCommand
 from heng_agent.ui.doctor import run_checks
 from heng_agent.ui.inputbox import InputBox
@@ -1446,7 +1447,7 @@ class Repl:
         self.console.print(f"[green]✓ 已切到{escape(label)}：{escape(str(path))}[/]")
 
     def agents_command(self, rest: str) -> None:
-        """/agents 列出自定义子智能体角色；/agents new 名字 建一个模板并用编辑器打开，存好就能用。"""
+        """/agents 角色总览（方向键选一个看详情）；/agents 名字 直接看详情；/agents new 名字 建模板并用编辑器打开。"""
         a, c = self.agent, self.console
         sub, _, name = rest.partition(" ")
         if sub == "new":
@@ -1468,14 +1469,30 @@ class Repl:
             c.print("没有自定义角色。/agents new 名字 建一个（如 测试员、审查员），"
                     "或放在 .heng-agent/agents/名字.md（项目）、~/.heng-agent/agents/（用户）。")  # fmt: skip
             return
-        hint = "模型用 task 工具时按用途挑；只读的可以并行，带改文件 / 跑命令工具的会向你确认"
-        c.print(f"[bold]子智能体角色[/]  [dim]{hint}[/]")
-        for role in a.agent_defs.values():
-            kind = "[green]只读[/]" if role.read_only else "[yellow]会改动[/]"
-            c.print(f"  [bold cyan]{escape(role.name)}[/] {kind}  {escape(role.description)}")
-            c.print(f"    [dim]工具：{escape(', '.join(role.tools))} · {escape(str(role.path))}[/]")
-            if role.unknown_tools:
-                c.print(f"    [yellow]不认识或不允许的工具（已忽略）：{escape(', '.join(role.unknown_tools))}[/]")
+        roles = list(a.agent_defs.values())
+        if sub:  # /agents 名字
+            role = a.agent_defs.get(rest.strip())
+            if role is None:
+                c.print(f"没有叫 {escape(rest.strip())} 的角色。/agents 看全部")
+            else:
+                agents_view.show_role(self, role)
+            return
+        if self._plain_input:  # 选择器用不了：纯文字一行一个
+            agents_view.show_summary(self, roles)
+            return
+        # 一行一个角色（名字 · 只读/会改动 · 来源 · 第一句说明），选中再看完整说明——以前全部平铺，长描述折成好几行，很乱
+        c.print(agents_view.headline(roles))
+        width = max(cell_len(r.name) for r in roles)
+        budget = agents_view.options_budget(self, width)
+        options = [Option(r.name, agents_view.option_label(r, width), detail=agents_view.option_detail(r, self, budget))
+                   for r in roles]  # fmt: skip
+        picked = self._choose("选一个角色看完整说明（ESC 退出）", options)
+        if picked is _PLAIN:
+            agents_view.show_summary(self, roles, with_headline=False)
+            return
+        if picked:
+            agents_view.show_role(self, a.agent_defs[str(picked)])
+        c.print(f"[dim]{agents_view.HINT}[/]")
 
     def reload_agents(self) -> None:
         """重新读角色文件，并把 task 工具换成带新角色列表的（工具说明里列着角色，模型靠它挑）。"""
