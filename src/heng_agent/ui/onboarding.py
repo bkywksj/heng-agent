@@ -6,7 +6,10 @@
 很多人在别的工具里已经配过密钥，先自动检测、能一键用上：
 - 环境变量里的 DEEPSEEK_API_KEY、ANTHROPIC_API_KEY……（预设服务商各自的 api_key_env）；
 - Claude Code 里配的服务（~/.claude/settings.json 的 env，或当前环境变量里的 ANTHROPIC_BASE_URL 与
-  ANTHROPIC_AUTH_TOKEN / ANTHROPIC_API_KEY）——国内用中转站的人大多是这样配的。
+  ANTHROPIC_AUTH_TOKEN / ANTHROPIC_API_KEY）——国内用中转站的人大多是这样配的；
+- Codex CLI 配的服务商（~/.codex/config.toml 的 model_providers：base_url + env_key 指的环境变量），
+  以及 `codex login --api-key` 存下的 OpenAI 密钥（~/.codex/auth.json 的 OPENAI_API_KEY）。
+  **不碰 ChatGPT 登录**（auth.json 的 tokens）：订阅账号的登录令牌只能给官方客户端用，第三方拿来调接口违反服务条款。
 都没有就走 /config provider 的向导。任何一步按 ESC 都可以跳过，之后随时 /config provider。
 """
 
@@ -14,6 +17,8 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,7 +29,7 @@ from rich.markup import escape
 from rich.panel import Panel
 
 from heng_agent import configfile
-from heng_agent.core.compat import claude_home
+from heng_agent.core.compat import claude_home, codex_home
 from heng_agent.core.errors import AgentError
 from heng_agent.core.types import TextDelta
 from heng_agent.model.providers import PRESETS, Profile, config_path
@@ -40,7 +45,7 @@ TEST_PROMPT = "这是一次连接测试，请只回复两个字：好的"
 class Found:
     """检测到的现成配置。"""
 
-    kind: str  # env：环境变量里的预设服务商密钥；claude：Claude Code 里配的服务
+    kind: str  # env：环境变量里的预设服务商密钥；claude：Claude Code 里配的服务；codex：Codex 配的服务商
     label: str
     source: str  # 从哪找到的（给用户看，让人放心）
     preset: str = ""
@@ -48,6 +53,8 @@ class Found:
     token: str = ""
     model: str = ""
     auth: str = "auto"  # ANTHROPIC_AUTH_TOKEN 是 Bearer 认证，ANTHROPIC_API_KEY 是 x-api-key（和 Claude Code 一致）
+    protocol: str = "anthropic"  # Codex 的服务商是 OpenAI 协议
+    name: str = "relay"  # 存进配置用的配置档名
 
 
 def needs_onboarding(home: Path) -> bool:
@@ -64,8 +71,56 @@ def _claude_env(settings_file: Path) -> dict[str, str]:
     return {str(k): str(v) for k, v in env.items()} if isinstance(env, dict) else {}
 
 
-def detect(environ: Mapping[str, str], claude_settings: Path) -> list[Found]:
-    """电脑上现成能用的配置：先 Claude Code 的服务（多是中转站，最常见），再环境变量里各家的密钥。"""
+LOCAL_HOSTS = ("localhost", "127.0.0.1", "::1")
+
+
+def _codex_found(codex_dir: Path, environ: Mapping[str, str]) -> list[Found]:
+    """Codex 配置里用 API key 的服务商。密钥只认 env_key 指的环境变量、experimental_bearer_token 与
+    auth.json 的 OPENAI_API_KEY；ChatGPT 登录的 tokens 一概不读（见模块说明）。本机服务（Ollama 等）不要密钥。"""
+    config = codex_dir / "config.toml"
+    try:
+        data = tomllib.loads(config.read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError):
+        data = {}
+    source = f"Codex 配置（{config}）"
+    profiles = [p for p in (data.get("profiles") or {}).values() if isinstance(p, dict)]
+
+    def model_for(provider: str) -> str:
+        if data.get("model_provider") == provider and isinstance(data.get("model"), str):
+            return data["model"]
+        return next((p["model"] for p in profiles if p.get("model_provider") == provider
+                     and isinstance(p.get("model"), str)), "")  # fmt: skip
+
+    found: list[Found] = []
+    providers = data.get("model_providers") or {}
+    for key, entry in providers.items() if isinstance(providers, dict) else ():
+        if not isinstance(entry, dict) or not isinstance(entry.get("base_url"), str):
+            continue
+        base = entry["base_url"].strip().rstrip("/")
+        env_key = entry.get("env_key")
+        token = (environ.get(env_key, "") if isinstance(env_key, str) else "").strip()
+        token = token or str(entry.get("experimental_bearer_token") or "").strip()
+        host = urlparse(base).hostname or base
+        if not base or (not token and host not in LOCAL_HOSTS):
+            continue  # 要密钥却没找到（环境变量没设）：用不了，不列出来
+        label = str(entry.get("name") or key)
+        found.append(Found("codex", f"Codex 用的服务：{label}（{host}）", source, base_url=base, token=token,
+                           model=model_for(key), auth="bearer", protocol="openai",
+                           name="codex-" + (re.sub(r"[^A-Za-z0-9_-]+", "-", key).strip("-") or "relay")))  # fmt: skip
+    try:
+        auth = json.loads((codex_dir / "auth.json").read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError):
+        auth = {}
+    api_key = auth.get("OPENAI_API_KEY") if isinstance(auth, dict) else None
+    if isinstance(api_key, str) and api_key.strip():  # codex login --api-key 存的是普通 API key，可以用
+        found.append(Found("codex", "Codex 登录用的 OpenAI API key", f"Codex 登录信息（{codex_dir / 'auth.json'}）",
+                           base_url="https://api.openai.com/v1", token=api_key.strip(), model=model_for("openai"),
+                           auth="bearer", protocol="openai", name="codex-openai"))  # fmt: skip
+    return found
+
+
+def detect(environ: Mapping[str, str], claude_settings: Path, codex_dir: Path | None = None) -> list[Found]:
+    """电脑上现成能用的配置：先 Claude Code 的服务（多是中转站，最常见），再 Codex 的，再环境变量里各家的密钥。"""
     found: list[Found] = []
     for source, env in ((f"Claude Code 配置（{claude_settings}）", _claude_env(claude_settings)),
                         ("当前的环境变量", dict(environ))):  # fmt: skip
@@ -77,6 +132,8 @@ def detect(environ: Mapping[str, str], claude_settings: Path) -> list[Found]:
             found.append(Found("claude", f"Claude Code 用的服务：{host}", source, base_url=base, token=token,
                                model=env.get("ANTHROPIC_MODEL", "").strip(),
                                auth="bearer" if bearer else "x-api-key"))  # fmt: skip
+    if codex_dir is not None:
+        found += [f for f in _codex_found(codex_dir, environ) if not any(g.base_url == f.base_url for g in found)]
     for name, preset in PRESETS.items():
         if name != "heng" and preset.api_key_env and environ.get(preset.api_key_env):
             found.append(Found("env", preset.note or name, f"环境变量 {preset.api_key_env}", preset=name))
@@ -119,10 +176,12 @@ def _save_found(repl: Repl, found: Found, cmd: Any) -> None:
     if found.kind == "env":
         name, entry = found.preset, {"preset": found.preset}
     else:
-        name = "relay"
-        entry = {"protocol": "anthropic", "base_url": found.base_url, "api_key": found.token, "auth": found.auth}
-        probe = Profile(protocol="anthropic", base_url=found.base_url, model=found.model or "?", api_key=found.token,
-                        auth=found.auth)  # type: ignore[arg-type]  # fmt: skip
+        name = found.name
+        entry = {"protocol": found.protocol, "base_url": found.base_url, "auth": found.auth}
+        if found.token:  # 本机服务（Ollama 等）不要密钥
+            entry["api_key"] = found.token
+        probe = Profile(protocol=found.protocol, base_url=found.base_url, model=found.model or "?",
+                        api_key=found.token or None, auth=found.auth)  # type: ignore[arg-type]  # fmt: skip
         entry["model"] = found.model or cmd._pick_model(probe)
         if not entry["model"] or entry["model"] == "?":
             raise AgentError("没有选模型，什么都没保存")
@@ -143,7 +202,7 @@ def _configure(repl: Repl) -> bool:
     from heng_agent.ui.config_cmd import ConfigCommand
 
     cmd = ConfigCommand(repl)
-    found = detect(os.environ, claude_home() / "settings.json")
+    found = detect(os.environ, claude_home() / "settings.json", codex_home())
     if found:
         repl.console.print("在你的电脑上找到了现成的配置，可以直接用：")
     options = [Option(str(i), f.label, detail=f"{f.source}" + (f" · 密钥 {mask(f.token)}" if f.token else ""))

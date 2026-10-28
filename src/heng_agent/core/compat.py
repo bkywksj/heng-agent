@@ -32,6 +32,12 @@ def claude_home() -> Path:
     return Path(custom) if custom else Path.home() / ".claude"
 
 
+def codex_home() -> Path:
+    """Codex CLI 的配置目录：和它一样认 CODEX_HOME 环境变量，没设就是 ~/.codex。"""
+    custom = os.environ.get("CODEX_HOME")
+    return Path(custom) if custom else Path.home() / ".codex"
+
+
 def project_memory_file(workdir: Path) -> Path:
     """往项目说明里写东西（# 快速记忆、/init）时写哪个文件：已有 AGENTS.md、HENG.md、CLAUDE.md 就写现有的那个
     （别另起一份），都没有就新建 AGENTS.md——它是跨工具的开放标准，别的编码工具也读得到。"""

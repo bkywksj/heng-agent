@@ -16,6 +16,7 @@ import pytest
 def _isolate_claude_home(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     home = tmp_path_factory.mktemp("claude-home")
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(home))
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path_factory.mktemp("codex-home")))  # 同理：不读本机真实的 Codex 配置
     # 测试从源码跑、会被当成开发版：没指定 home 的 Settings 会落到真实的 ~/.heng-agent-dev。也指到临时目录
     monkeypatch.setenv("HENG_AGENT_HOME", str(tmp_path_factory.mktemp("heng-home")))
     # 内置技能默认指到空目录：大多数测试要的是「只有它自己放的技能」，以后加内置技能也不连带改坏它们。

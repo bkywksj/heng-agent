@@ -63,7 +63,7 @@ def _repl(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, answers: list[str], m
 
 
 def test_later_saves_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(onboarding, "detect", lambda environ, path: [])
+    monkeypatch.setattr(onboarding, "detect", lambda *args: [])
     repl, console = _repl(tmp_path, monkeypatch, ["later"], FakeModel([]))
     onboarding.run(repl)
     assert not config_path(repl.agent.settings.home).exists()
@@ -104,3 +104,82 @@ def test_print_mode_hints_when_not_configured(tmp_path: Path, monkeypatch: pytes
     monkeypatch.setattr(cli, "make_client", lambda profile, max_tokens: FakeModel([["好"]]))
     assert cli.main(["--workdir", str(tmp_path), "-p", "你好"]) == 0
     assert "还没配置模型服务" in capsys.readouterr().err
+
+
+# ---------- Codex 的配置 ----------
+
+
+def _codex(tmp_path: Path, toml: str, auth: dict[str, Any] | None = None) -> Path:
+    codex = tmp_path / "codex"
+    codex.mkdir()
+    (codex / "config.toml").write_text(toml, encoding="utf-8")
+    if auth is not None:
+        (codex / "auth.json").write_text(json.dumps(auth), encoding="utf-8")
+    return codex
+
+
+CODEX_TOML = """
+model = "gpt-5.1-codex"
+model_provider = "myrelay"
+
+[model_providers.myrelay]
+name = "我的中转"
+base_url = "https://relay.example.com/v1/"
+env_key = "MY_RELAY_KEY"
+
+[model_providers.nokey]
+base_url = "https://nokey.example.com/v1"
+env_key = "UNSET_KEY"
+
+[model_providers.local]
+base_url = "http://127.0.0.1:11434/v1"
+
+[profiles.fast]
+model = "qwen3-coder"
+model_provider = "local"
+"""
+
+
+def test_detect_codex_providers(tmp_path: Path) -> None:
+    codex = _codex(tmp_path, CODEX_TOML)
+    found = [f for f in onboarding.detect({"MY_RELAY_KEY": "sk-relay-abcdef123456"}, tmp_path / "无", codex)
+             if f.kind == "codex"]  # fmt: skip
+    by_name = {f.name: f for f in found}
+    assert set(by_name) == {"codex-myrelay", "codex-local"}  # nokey：环境变量没设、用不了，不列出来
+    relay = by_name["codex-myrelay"]
+    assert relay.base_url == "https://relay.example.com/v1" and relay.token == "sk-relay-abcdef123456"
+    assert relay.model == "gpt-5.1-codex" and relay.protocol == "openai" and relay.auth == "bearer"
+    assert by_name["codex-local"].model == "qwen3-coder" and by_name["codex-local"].token == ""  # 本机服务不要密钥
+
+
+def test_codex_api_key_login_but_never_chatgpt_tokens(tmp_path: Path) -> None:
+    """codex login --api-key 存的普通 API key 可以用；ChatGPT 登录的令牌不读——订阅账号的登录只能给官方客户端用。"""
+    chatgpt = {"auth_mode": "chatgpt", "OPENAI_API_KEY": None, "tokens": {"access_token": "chatgpt-secret-token"}}
+    assert onboarding.detect({}, tmp_path / "无", _codex(tmp_path, "", chatgpt)) == []
+    (tmp_path / "codex" / "auth.json").write_text(
+        json.dumps({"OPENAI_API_KEY": "sk-openai-123456789"}), encoding="utf-8"
+    )
+    found = onboarding.detect({}, tmp_path / "无", tmp_path / "codex")
+    assert [(f.name, f.base_url, f.token) for f in found] == [
+        ("codex-openai", "https://api.openai.com/v1", "sk-openai-123456789")]  # fmt: skip
+
+
+def test_broken_codex_config_is_ignored(tmp_path: Path) -> None:
+    codex = _codex(tmp_path, "这不是 toml = = =", {"x": 1})
+    assert onboarding.detect({}, tmp_path / "无", codex) == []
+    assert onboarding.detect({}, tmp_path / "无", tmp_path / "不存在") == []
+
+
+def test_use_codex_provider_saves_openai_profile(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    codex = _codex(tmp_path, CODEX_TOML)
+    monkeypatch.setenv("MY_RELAY_KEY", "sk-relay-abcdef123456")
+    monkeypatch.setattr(onboarding, "claude_home", lambda: tmp_path / "没有")
+    monkeypatch.setattr(onboarding, "codex_home", lambda: codex)
+    repl, console = _repl(tmp_path, monkeypatch, ["0"], FakeModel([["好的"]]))
+    onboarding.run(repl)
+    data = json.loads(config_path(repl.agent.settings.home).read_text(encoding="utf-8"))
+    assert data["default"] == "codex-myrelay"
+    assert data["profiles"]["codex-myrelay"] == {"protocol": "openai", "base_url": "https://relay.example.com/v1",
+                                                 "auth": "bearer", "api_key": "sk-relay-abcdef123456",
+                                                 "model": "gpt-5.1-codex"}  # fmt: skip
+    assert "✓ 连接成功" in console.export_text()  # 存好后照样测了连接

@@ -35,8 +35,12 @@ uv tool uninstall heng-agent    # 卸载
 装完如果提示「not on your PATH」，运行一次 `uv tool update-shell` 再重开终端。
 
 **第一次运行**会引导你配置模型服务：先自动找电脑上现成的配置（环境变量里的 `DEEPSEEK_API_KEY` 等密钥、
-Claude Code 里配的中转站），能一键用上；没有就选服务商、填密钥。配好后自动测一下连接，失败会说清楚原因
-（密钥不对、余额不足、连不上）。随时可以用 `/config provider` 修改。
+Claude Code 里配的中转站、Codex 的 `~/.codex/config.toml` 里用 API key 的服务商与 `codex login --api-key` 存的密钥），
+能一键用上；没有就选服务商、填密钥。配好后自动测一下连接，失败会说清楚原因（密钥不对、余额不足、连不上）。
+随时可以用 `/config provider` 修改。
+
+> Claude 订阅（Pro / Max）、ChatGPT 账号的登录**不能**拿来在 heng-agent 里用：订阅账号的登录令牌只给官方客户端用，
+> 第三方读出来调接口违反服务条款，可能导致封号。heng-agent 只用 API key。想用订阅额度，就直接用 Claude Code / Codex。
 
 ### 平台支持
 
