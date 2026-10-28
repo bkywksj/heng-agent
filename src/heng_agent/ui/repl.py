@@ -55,7 +55,7 @@ from heng_agent.session import SessionStore
 from heng_agent.tools.shell import clip, run_command, shell_argv
 from heng_agent.tools.skill import skill_source
 from heng_agent.tools.todo import render as render_todos
-from heng_agent.ui import info, mcp_view, statusline
+from heng_agent.ui import info, mcp_view, statusline, suggest
 from heng_agent.ui.approval import ApprovalMixin
 from heng_agent.ui.config_cmd import ConfigCommand
 from heng_agent.ui.doctor import run_checks
@@ -142,6 +142,10 @@ HELP = """查看状态
   Ctrl+C / ESC 清空输入框，任务运行时按 ESC 中断；Ctrl+L 清屏；Ctrl+B 把跑着的命令转到后台
   有子智能体在跑时：输入框最后一行按 ↓ 选中它，Enter 看它在做什么，ESC 回到输入框
   空输入框里连按两次 Ctrl+C 退出"""
+
+
+#: 下一句建议的回答最多多少 token（只要一句话；留些余量给关不掉思考的模型）
+SUGGEST_MAX_TOKENS = 1024
 
 
 class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin, TurnMixin, SubagentsMixin):
@@ -305,6 +309,37 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin, Tu
     def _profile_url(self) -> str:
         profile = getattr(self.agent.client, "profile", None)
         return getattr(profile, "base_url", "") or ""
+
+    def _suggest_next(self) -> None:
+        """这一问答完：在后台问一句「下一句建议」，到了就灰字显示在空的输入框里（见 ui/suggest.py）。
+
+        关掉了（prompt_suggestions）、没有带边框的输入框（灰字没处显示）、客户端不是按配置档建的（测试）都不问。"""
+        box = self._box
+        if box is None or self._plain_input:
+            return
+        box.suggestion = ""  # 上一句建议先作废（关掉了也一样）
+        # 计划模式里多半还在商量方案，不给（同 Claude Code）
+        if not self.agent.settings.prompt_suggestions or self.agent.permissions.mode == "plan":
+            return
+        profile = getattr(self.agent.client, "profile", None)
+        if profile is None:
+            return
+        messages, system = list(self.agent.messages), self.agent.system_prompt()
+
+        def work() -> None:
+            try:
+                client = make_client(profile, SUGGEST_MAX_TOKENS)
+                if hasattr(client, "effort"):
+                    client.effort = "low"  # 一句话的事：想得少一点，快、便宜
+                text = suggest.ask(client, system, messages)
+            except Exception as exc:  # 建议拿不到不影响使用：记日志，不打扰
+                logs.log.info("下一句建议没拿到：%s", exc)
+                return
+            if text and self.agent.messages == messages:  # 这期间又发了一问：这句建议过时了
+                box.suggestion = text
+                box.refresh()
+
+        threading.Thread(target=work, name="heng-suggest", daemon=True).start()
 
     def _ensure_window(self) -> None:
         """配置档没写 context_window 时，在后台向服务商查一次这个模型的上下文长度（换了模型就再查）。
@@ -1119,6 +1154,7 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin, Tu
                     self._watcher.start()
                     self.agent.run(text, self.on_event, self.approve, images=images)
                 self.notify_if_long(time.monotonic() - started)
+                self._suggest_next()
             except KeyboardInterrupt:
                 self._end_text()
                 self._unspin()

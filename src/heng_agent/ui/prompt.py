@@ -66,6 +66,8 @@ STYLE = Style.from_dict(
         "todos": "#7f848e",
         "queued": "#7f848e",  # 回答中排着队的消息：灰色，和 Claude Code 一样
         # 子智能体面板（状态栏下面）：main 加粗，快捷键用强调色，选中那行高亮
+        "suggestion": "#5c6370",  # 下一句建议：灰字，像占位文字
+        "suggestion.key": "#4b5263",
         "agents.main": "bold #abb2bf",
         "agents.hint": "#7f848e",
         "agents.key": "bold #61afef",

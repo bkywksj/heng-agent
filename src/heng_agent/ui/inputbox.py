@@ -36,6 +36,7 @@ from prompt_toolkit.layout.containers import Float
 from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.layout.menus import CompletionsMenu
+from prompt_toolkit.layout.processors import Processor, Transformation, TransformationInput
 from prompt_toolkit.output import Output
 from prompt_toolkit.search import accept_search
 from prompt_toolkit.styles import Style
@@ -157,6 +158,8 @@ class InputBox:
         self.todos = todos  # 当前任务清单的文字（空 = 没有），显示在输入框上方
         self.show_todos = True  # Ctrl+T 切换
         self.agents = agents or (lambda: [])
+        #: 下一句建议（空 = 没有）：输入框是空的时候灰字显示，Tab 采纳；一打字就不再显示（见 _SuggestionHint）
+        self.suggestion = ""
         self.on_view_agent = on_view_agent
         #: 子智能体面板里选中的那一行（None = 没在选；在输入框最后一行按 ↓ 进入，见 _bindings）
         self.agent_pick: int | None = None
@@ -207,6 +210,15 @@ class InputBox:
             buffer.apply_completion(comp)
             if isinstance(comp, CmdCompletion) and comp.takes_more:
                 buffer.insert_text(" ")
+
+        # 空输入框里有下一句建议时 Tab 或 → 采纳（同 Claude Code；放在补全的 Tab 后面登记：后登记的优先）
+        has_suggestion = Condition(lambda: bool(self.suggestion) and not buffer.text and self.turn is None)
+
+        @kb.add("tab", filter=has_suggestion)
+        @kb.add("right", filter=has_suggestion)
+        def _accept_suggestion(event: KeyPressEvent) -> None:
+            text, self.suggestion = self.suggestion, ""
+            buffer.insert_text(text)
 
         @kb.add("c-j")
         @kb.add("escape", "enter")
@@ -401,7 +413,9 @@ class InputBox:
             text_if_not_searching="", forward_search_prompt="向后搜：", backward_search_prompt="搜索历史："
         )
         body = Window(
-            BufferControl(buffer=buffer, search_buffer_control=search.control),
+            BufferControl(
+                buffer=buffer, search_buffer_control=search.control, input_processors=[_SuggestionHint(self)]
+            ),
             height=body_height,
             wrap_lines=True,
             get_line_prefix=lambda line, wrap: [("class:prompt", "› " if line == 0 and not wrap else "  ")],
@@ -588,6 +602,7 @@ class InputBox:
         self._buffer = buffer
         self.agent_pick = None
         buffer.on_text_changed += lambda _: setattr(self, "agent_pick", None)  # 接着打字：退出面板选择
+        buffer.on_text_changed += lambda b: setattr(self, "suggestion", "") if b.text else None  # 打字了：建议作废
         # 历史是异步加载的：PromptSession 会自己触发，这里手搭的 Application 要主动做，否则上箭头取不到历史
         self.app = app
         try:
@@ -662,3 +677,17 @@ def _erase_reflowed_on_resize(app: Application[Any]) -> None:
 
     renderer.render = render  # type: ignore[method-assign]
     renderer.erase = erase  # type: ignore[method-assign]
+
+
+class _SuggestionHint(Processor):
+    """空输入框里灰字显示下一句建议（后面跟「Tab 采纳」）；回答中、框里有字时不显示。"""
+
+    def __init__(self, box: InputBox) -> None:
+        self.box = box
+
+    def apply_transformation(self, ti: TransformationInput) -> Transformation:
+        box = self.box
+        if ti.lineno == 0 and not ti.document.text and box.suggestion and box.turn is None:
+            hint = [("class:suggestion", box.suggestion), ("class:suggestion.key", "   Tab / → 采纳")]
+            return Transformation([*ti.fragments, *hint])
+        return Transformation(ti.fragments)

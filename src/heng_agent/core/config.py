@@ -36,6 +36,10 @@ class Settings(BaseModel):
     notify_after: float = Field(
         default=30.0, ge=0, description="任务跑超过这么多秒，结束时响铃提醒（Windows Terminal 会闪任务栏）；0 关闭"
     )
+    prompt_suggestions: bool = Field(
+        default=True,
+        description="每一问答完后在空的输入框里灰字给一句「下一句建议」，Tab 采纳（每一问多一次模型请求）",
+    )
     mcp_tool_search: Literal["auto", "on", "off"] = Field(
         default="auto",
         description="MCP 工具按需加载：auto 在声明超过上下文 10% 时启用（先不发声明，模型用 tool_search 搜到再加载）",
