@@ -155,10 +155,11 @@ def human_tokens(n: int) -> str:
     return text + unit
 
 
-#: 第二行权限模式前的图标，和 Claude Code 一样用 ⏵：箭头越多放得越开；plan 用暂停号 ‖（先出计划、不动手）。
+#: 第二行权限模式前的图标，和 Claude Code 一样用 ⏵：箭头越多放得越开；plan 用暂停号 ❚❚（先出计划、不动手）。
 #: 都是单宽字符；别换成 ⏩ 这类 emoji，有的终端算两格、有的算一格，对不齐。
-#: plan 没用 Claude Code 的 ⏸：Windows Terminal 把它画成蓝色 emoji 方块、压住后面的字，加 U+FE0E 也一样（实测）
-MODE_ICON = {"ask": "⏵", "accept-edits": "⏵⏵", "plan": "‖", "auto": "⏵⏵⏵"}
+#: plan 没用 Claude Code 的 ⏸：Windows Terminal 把它画成蓝色 emoji 方块、压住后面的字，加 U+FE0E 也一样；
+#: ❚❚（U+275A）照文字画、跟着模式的颜色（实测）
+MODE_ICON = {"ask": "⏵", "accept-edits": "⏵⏵", "plan": "❚❚", "auto": "⏵⏵⏵"}
 MODE_STYLE = {"ask": "class:bar.mode", "accept-edits": "class:bar.mode-edits", "plan": "class:bar.mode-plan",
               "auto": "class:bar.mode-auto"}  # fmt: skip
 CTX_CELLS = 8  # 上下文进度条的格数

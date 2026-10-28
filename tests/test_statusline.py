@@ -52,7 +52,7 @@ def test_mode_line_per_mode_and_reminders() -> None:
     assert icons == {
         "ask": "⏵",
         "accept-edits": "⏵⏵",
-        "plan": "‖",
+        "plan": "❚❚",
         "auto": "⏵⏵⏵",
     }  # ⏵ 同 Claude Code；⏸ 在 Windows Terminal 里是 emoji 方块
     mode = _lines(toolbar("ask", "m", "w", 70_000, 100_000, background=2))[1]
@@ -61,7 +61,7 @@ def test_mode_line_per_mode_and_reminders() -> None:
 
 def test_icons_are_single_width() -> None:
     """emoji 在有的终端里算两格、有的算一格，对不齐；状态栏只用单宽字符。"""
-    for ch in "▣|⏵‖█░✓✗✻":
+    for ch in "▣|⏵❚█░✓✗✻":
         assert cell_len(ch) == 1, ch
 
 
