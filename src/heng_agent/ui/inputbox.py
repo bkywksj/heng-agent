@@ -302,7 +302,8 @@ class InputBox:
         )
         # 边框颜色跟着权限模式变：HSplit 的 style 可以是函数，里面的边框字符继承它
         frame = HSplit([top, middle, bottom], style=lambda: f"fg:{FRAME_COLORS.get(self.get_mode(), '#61afef')}")
-        status = Window(FormattedTextControl(self.toolbar), height=1, style="class:bottom-toolbar")
+        # 状态栏两行（信息 + 权限模式），用户的状态栏命令可能输出更多行：高度跟着内容走
+        status = Window(FormattedTextControl(self.toolbar), dont_extend_height=True, style="class:bottom-toolbar")
 
         def todo_text() -> str:
             return (self.todos() if self.todos else "").rstrip()

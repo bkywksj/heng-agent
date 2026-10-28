@@ -60,6 +60,23 @@ class Settings(BaseModel):
     def _check_proxy(cls, value: str | None) -> str | None:
         return check_proxy(value)
 
+    status_line: str | None = Field(
+        default=None,
+        description="状态栏命令：输出替换状态栏第一行（可带颜色），从标准输入收到会话信息的 JSON。"
+        "不设 = 用 Claude Code 的 statusLine（~/.claude/settings.json）；空字符串 = 不用。只认用户配置",
+    )
+
+    @field_validator("status_line", mode="before")
+    @classmethod
+    def _status_command(cls, value: object) -> object:
+        # 也认 Claude Code 的写法 {"type": "command", "command": "..."}，照抄过来就能用
+        if isinstance(value, dict):
+            command = value.get("command")
+            if value.get("type", "command") != "command" or not isinstance(command, str):
+                raise ValueError('status_line 写成命令字符串，或 {"type": "command", "command": "..."}')
+            return command
+        return value
+
     claude_hooks_skip: list[str] = Field(
         default_factory=list,
         description="不跑的 Claude Code 钩子：命令里含其中任一段文字就跳过（专给 Claude Code 自己用的集成钩子，"

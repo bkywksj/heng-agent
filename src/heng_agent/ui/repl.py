@@ -11,6 +11,7 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
+from prompt_toolkit.application import get_app_or_none
 from prompt_toolkit.history import FileHistory
 from rich.console import Console
 from rich.live import Live
@@ -21,7 +22,7 @@ from rich.syntax import Syntax
 from rich.table import Table
 from rich.text import Text
 
-from heng_agent import worktree
+from heng_agent import __version__, worktree
 from heng_agent.agent import Agent
 from heng_agent.attachments import absorb_paths, paste_clipboard, paste_to_mentions
 from heng_agent.commands import Command, discover_commands, expand_command, shell_runner
@@ -44,7 +45,7 @@ from heng_agent.session import SessionStore
 from heng_agent.tools.shell import clip, run_command, shell_argv
 from heng_agent.tools.skill import skill_source
 from heng_agent.tools.todo import render as render_todos
-from heng_agent.ui import info, mcp_view
+from heng_agent.ui import info, mcp_view, statusline
 from heng_agent.ui.approval import ApprovalMixin
 from heng_agent.ui.config_cmd import ConfigCommand
 from heng_agent.ui.doctor import run_checks
@@ -167,6 +168,10 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin):
         # 确认框里选了「以后都允许」：把规则写进用户配置
         agent.permissions.on_persist = self._persist_rule
         self._plain_input = False  # 输入框用不了时退回普通输入
+        # 状态栏要起子进程才拿得到的数据（git 分支、用户的状态栏命令）：后台跑、缓存，跑完重画输入框
+        self._bar_git = statusline.Background(on_change=self._refresh_input)
+        self._bar_custom = statusline.Background(on_change=self._refresh_input)
+        self._bar_command = statusline.load_command(agent.settings)
         self._status: Any = None  # 等待动画（rich Status）
         self._event_lock = threading.RLock()
         self._live: Live | None = None  # 正在流式渲染的一段 Markdown
@@ -227,9 +232,36 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin):
 
     def _toolbar(self) -> Any:
         a = self.agent
+        app = get_app_or_none()
+        width = app.output.get_size().columns if app is not None else None
+        branch, dirty = self._bar_git.value or (None, False)
         return toolbar(a.permissions.mode, self._model_label(), str(a.settings.workdir), a.last_input_tokens,
                        a.context_window, len(a.ctx.tasks.running()), thinking=a.thinking,
-                       compact_ratio=a.settings.compact_ratio, mcp=mcp_view.toolbar_part(self))  # fmt: skip
+                       compact_ratio=a.settings.compact_ratio, mcp=mcp_view.toolbar_part(self), branch=branch,
+                       dirty=dirty, speed=a.last_speed, width=width, custom=self._custom_line())  # fmt: skip
+
+    def _custom_line(self) -> list[tuple[str, str]] | None:
+        """用户状态栏命令的输出（还没跑完第一次时 None：先显示内置的第一行）；出错的说明用红字。"""
+        value = self._bar_custom.value
+        if isinstance(value, str):
+            return [("class:bar.ctx-hot", f" {value}")]
+        return value
+
+    def _refresh_bar(self) -> None:
+        """显示输入框前（一问答完）刷新状态栏的外部数据：git 分支、用户的状态栏命令。都在后台跑，不拖慢输入框。"""
+        a = self.agent
+        workdir = a.settings.workdir
+        self._bar_git.refresh(lambda: statusline.git_state(workdir))
+        command = self._bar_command
+        if command:
+            data = statusline.payload(
+                session_id=a.session.id if a.session else "", transcript=str(a.session.path) if a.session else "",
+                workdir=workdir, model=a.model_name, provider=self.provider_name or "", version=__version__,
+                mode=a.permissions.mode, used=a.last_input_tokens, window=a.context_window,
+                total_in=a.usage.get("input_tokens", 0), total_out=a.usage.get("output_tokens", 0),
+                speed=a.last_speed,
+            )  # fmt: skip
+            self._bar_custom.refresh(lambda: statusline.run_command(command, data, workdir))
 
     def _refresh_input(self) -> None:
         """后台 MCP 连完时（连接线程里调）：输入框正开着就重画，状态栏立刻显示连上了几个。"""
@@ -872,6 +904,7 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin):
             # 欢迎页之后若有确认问题（信任钩子、信任 MCP）挡着，等用户答完服务往往已经连好：
             # 在输入框出现前就把结果打出来，不然欢迎页一直写着「后台连接中」，看起来没有任何变化（用户反馈）
             self._sync_mcp(wait=False)
+            self._refresh_bar()
             try:
                 text = self.read()
             except (EOFError, KeyboardInterrupt):

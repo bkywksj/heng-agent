@@ -24,10 +24,11 @@ from heng_agent.core.errors import AgentError
 SETTINGS_KEYS = (
     "permission_mode", "max_tokens", "max_rounds", "bash_timeout", "context_window", "compact_ratio", "image_preview",
     "notify_after", "mcp_tool_search", "thinking", "thinking_budget", "claude_user_config", "claude_hooks_skip",
-    "update_check", "proxy",
+    "update_check", "proxy", "status_line",
 )  # fmt: skip
 #: 只能写在用户配置里的设置：项目配置跟着仓库走，不能让别人的仓库替你决定请求经哪个代理发出去（读配置档时会报错说明）
-USER_ONLY_SETTINGS = ("proxy",)
+#: 状态栏命令同理：写在项目配置里，打开别人的仓库就会执行它指定的命令
+USER_ONLY_SETTINGS = ("proxy", "status_line")
 SECRET_KEYS = ("api_key",)
 
 

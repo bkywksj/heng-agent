@@ -6,11 +6,13 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
+from pathlib import Path
 
 from prompt_toolkit.completion import CompleteEvent, Completer, Completion
 from prompt_toolkit.document import Document
 from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.styles import Style
+from rich.cells import cell_len
 
 #: 内置斜杠命令的一句话说明（补全菜单里显示）
 BUILTIN_HELP = {
@@ -57,16 +59,21 @@ MODE_LABEL = {
 
 STYLE = Style.from_dict(
     {
-        "bottom-toolbar": "noreverse bg:#1f2430 #c8ccd4",
+        "bottom-toolbar": "noreverse #c8ccd4",  # 不加底色：两行状态栏带底色在深色终端里太突兀（用户反馈）
         "frame-title": "nobold #5c6370",  # 边框上的按键提示：灰、不加粗，不抢输入的视线
         "flash": "#98c379",
         "todos": "#7f848e",
         "bar.mode": "bold #61afef",
-        "bar.mode-auto": "bold bg:#e5c07b #1f2430",
+        "bar.mode-edits": "bold #e5c07b",
+        "bar.mode-auto": "bold #e06c75",
         "bar.mode-plan": "bold #98c379",
+        "bar.project": "bold #e5c07b",
+        "bar.branch": "#98c379",
+        "bar.sep": "#4b5263",
+        "bar.ctx-warn": "#e5c07b",
         "bar.model": "#c678dd",
         "bar.dim": "#7f848e",
-        "bar.ctx": "#56b6c2",
+        "bar.ctx": "#98c379",
         "bar.ctx-hot": "bold #e06c75",
         "bar.background": "bold #e5c07b",
         "bar.thinking": "bold #c678dd",
@@ -147,32 +154,95 @@ def human_tokens(n: int) -> str:
     return text + unit
 
 
+#: 第二行权限模式前的图标：箭头越多放得越开，plan 是暂停号（先出计划、不动手）。
+#: 都用单宽字符：emoji 在有的终端里宽度不一，对不齐
+MODE_ICON = {"ask": "▸", "accept-edits": "▸▸", "plan": "‖", "auto": "▸▸▸"}
+MODE_STYLE = {"ask": "class:bar.mode", "accept-edits": "class:bar.mode-edits", "plan": "class:bar.mode-plan",
+              "auto": "class:bar.mode-auto"}  # fmt: skip
+CTX_CELLS = 8  # 上下文进度条的格数
+SEP = ("class:bar.sep", " │ ")
+
+
+def context_bar(used: int, window: int, threshold: float) -> tuple[str, str]:
+    """(样式, 进度条)：一半以下绿，过半黄，离自动压缩不到 10% 红。"""
+    pct = used / window * 100 if window else 0.0
+    filled = min(CTX_CELLS, round(pct / 100 * CTX_CELLS))
+    if pct >= threshold - 10:
+        style = "class:bar.ctx-hot"
+    elif pct >= 50:
+        style = "class:bar.ctx-warn"
+    else:
+        style = "class:bar.ctx"
+    return style, "█" * filled + "░" * (CTX_CELLS - filled)
+
+
 def toolbar(mode: str, model: str, workdir: str, used: int, window: int, background: int = 0, *,
-            thinking: bool = False, compact_ratio: float = 0.8,
-            mcp: tuple[str, str] | None = None) -> FormattedText:  # fmt: skip
+            thinking: bool = False, compact_ratio: float = 0.8, mcp: tuple[str, str] | None = None,
+            branch: str | None = None, dirty: bool = False, speed: float | None = None, width: int | None = None,
+            custom: list[tuple[str, str]] | None = None) -> FormattedText:  # fmt: skip
+    """输入框下面的两行状态栏。
+
+    第一行是信息：项目名、git 分支、模型、MCP、上一次的输出速度、上下文进度条；第二行是权限模式与提醒。
+    权限模式决定改文件、跑命令要不要问，单独一行最醒目（以前全挤在一行，窄窗口里后半截直接被截掉）。
+    width：终端宽度。第一行放不下时按重要程度依次去掉：速度 → 分支 → 服务商名 → token 数 → 进度条，不截断。
+    custom：用户的状态栏命令（status_line 设置）的输出，有的话替换第一行。
+    """
     pct = used / window * 100 if window else 0.0
     threshold = compact_ratio * 100
-    mode_style = {"auto": "class:bar.mode-auto", "plan": "class:bar.mode-plan"}.get(mode, "class:bar.mode")
-    ctx_style = "class:bar.ctx-hot" if pct >= threshold - 10 else "class:bar.ctx"
-    short_dir = workdir if len(workdir) <= 48 else "…" + workdir[-47:]
-    parts = [
-        (mode_style, f" {MODE_LABEL.get(mode, mode)} "),
-        ("", "  "),
-        ("class:bar.model", model),
-    ]
-    if thinking:
-        parts.append(("class:bar.thinking", "  ✻ 思考"))
-    if mcp:  # MCP 连接情况：(样式, 文字)，见 mcp_view.toolbar_part
-        parts.append(mcp)
-    parts += [
-        ("class:bar.dim", f"  {short_dir}  "),
-        (ctx_style, f"上下文 {pct:.0f}%（{human_tokens(used)}/{human_tokens(window)}）"),
-    ]
-    if window and threshold - 20 <= pct < threshold:  # 快到了：提前说一声，免得在下一问里意外压缩
-        parts.append((ctx_style, f" · 距自动压缩 {threshold - pct:.0f}%"))
-    elif window and pct >= threshold:
-        parts.append((ctx_style, " · 下一问前自动压缩"))
+    line2 = mode_line(mode, background=background, pct=pct, threshold=threshold, window=window, width=width)
+    if custom is not None and mcp:  # 第一行换成了用户的输出：MCP 连接情况挪到第二行，不然连接中、连不上都看不到
+        line2.append((mcp[0], " · " + mcp[1].strip()))
+    line1 = custom if custom is not None else info_line(
+        model, workdir, used, window, thinking=thinking, threshold=threshold, mcp=mcp, branch=branch, dirty=dirty,
+        speed=speed, width=width,
+    )  # fmt: skip
+    return FormattedText([*line1, ("", "\n"), *line2])
+
+
+def info_line(model: str, workdir: str, used: int, window: int, *, thinking: bool, threshold: float,
+              mcp: tuple[str, str] | None, branch: str | None, dirty: bool, speed: float | None,
+              width: int | None) -> list[tuple[str, str]]:  # fmt: skip
+    pct = used / window * 100 if window else 0.0
+    name = Path(workdir).name or workdir  # 完整路径欢迎页里有；这里只放项目名，省出地方
+    ctx_style, bar = context_bar(used, window, threshold)
+    short_model = model.rsplit(" · ", 1)[-1]  # 「yongye · claude-sonnet-5」窄了只留模型名
+    # 依次去掉的东西：每一步在前一步的基础上再少一样
+    steps = [set(), {"speed"}, {"speed", "branch"}, {"speed", "branch", "provider"},
+             {"speed", "branch", "provider", "tokens"}, {"speed", "branch", "provider", "tokens", "bar"}]  # fmt: skip
+    parts: list[tuple[str, str]] = []
+    for drop in steps:
+        parts = [("class:bar.project", f" ▣ {name}")]
+        if branch and "branch" not in drop:
+            parts.append(("class:bar.branch", f"  {branch}{'*' if dirty else ''}"))
+        parts += [SEP, ("class:bar.model", short_model if "provider" in drop else model)]
+        if thinking:
+            parts.append(("class:bar.thinking", " ✻思考"))
+        if mcp:  # MCP 连接情况：(样式, 文字)，见 mcp_view.toolbar_part
+            parts += [SEP, (mcp[0], mcp[1].strip())]
+        if speed and "speed" not in drop:
+            parts += [SEP, ("class:bar.dim", f"{speed:.0f}t/s")]
+        ctx = "上下文" if "bar" in drop else f"上下文 {bar}"
+        ctx += f" {pct:.0f}%" + ("" if "tokens" in drop else f" {human_tokens(used)}/{human_tokens(window)}")
+        parts += [SEP, (ctx_style, ctx)]
+        if width is None or cell_len("".join(t for _, t in parts)) < width:
+            break
+    return parts
+
+
+def mode_line(mode: str, *, background: int, pct: float, threshold: float, window: int,
+              width: int | None) -> list[tuple[str, str]]:  # fmt: skip
+    icon = MODE_ICON.get(mode, "▸")
+    parts: list[tuple[str, str]] = [(MODE_STYLE.get(mode, "class:bar.mode"), f" {icon} {MODE_LABEL.get(mode, mode)}")]
+    hint = ("class:bar.dim", "  (Shift+Tab 切换)")
+    extras: list[tuple[str, str]] = []
     if background:  # 还有后台任务在跑：显眼地标出来，免得忘了
-        parts.append(("class:bar.background", f"  后台 {background}"))
-    parts.append(("class:bar.dim", "   Shift+Tab 切换模式"))
-    return FormattedText(parts)
+        extras.append(("class:bar.background", f" · 后台任务 {background}"))
+    ctx_style = "class:bar.ctx-hot" if pct >= threshold - 10 else "class:bar.ctx-warn"
+    if window and threshold - 20 <= pct < threshold:  # 快到了：提前说一声，免得在下一问里意外压缩
+        extras.append((ctx_style, f" · 距自动压缩 {threshold - pct:.0f}%"))
+    elif window and pct >= threshold:
+        extras.append((ctx_style, " · 下一问前自动压缩"))
+    line = [*parts, hint, *extras]
+    if width is not None and cell_len("".join(t for _, t in line)) >= width:
+        line = [*parts, ("class:bar.dim", "  (Shift+Tab)"), *extras]  # 窄了提示缩短，提醒照留
+    return line

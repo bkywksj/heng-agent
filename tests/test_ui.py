@@ -36,15 +36,14 @@ def test_toolbar_content() -> None:
     def text(ft: object) -> str:
         return "".join(part[1] for part in ft)  # type: ignore[attr-defined]
 
-    bar = toolbar("ask", "yongye · claude-sonnet-5", r"E:\proj", 1741, 200_000)
-    assert (
-        "ask 每次问" in text(bar) and "yongye · claude-sonnet-5" in text(bar) and "上下文 1%（1.7k/200k）" in text(bar)
-    )
+    bar = text(toolbar("ask", "yongye · claude-sonnet-5", r"E:\proj", 1741, 200_000))
+    info, mode = bar.split("\n")  # 两行：信息 + 权限模式
+    assert "▣ proj" in info and "E:\\" not in info  # 只放项目名，完整路径在欢迎页
+    assert "yongye · claude-sonnet-5" in info and "上下文 ░░░░░░░░ 1% 1.7k/200k" in info
+    assert mode.startswith(" ▸ ask 每次问") and "Shift+Tab 切换" in mode
     hot = toolbar("auto", "m", "w", 170_000, 200_000)
     styles = [part[0] for part in hot]
     assert "class:bar.mode-auto" in styles and "class:bar.ctx-hot" in styles  # auto 与上下文快满都醒目标出
-    long_dir = text(toolbar("ask", "m", "C:/" + "x" * 80, 0, 1))
-    assert "…" in long_dir  # 太长的目录从左边截断
 
 
 def test_mode_cycle_order() -> None:

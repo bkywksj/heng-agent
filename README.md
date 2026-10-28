@@ -136,7 +136,20 @@ heng-agent --provider heng --model heng-mini-0.1
 ## 界面里
 
 - 输入框：**Enter 发送，Shift+Enter 换行**（其他终端里用 Ctrl+J / Alt+Enter），`/` 补全命令，`@` 补全文件路径，
-  Shift+Tab 切换权限模式（边框颜色跟着变）。底部状态栏：权限模式 · 服务商与模型 · 目录 · 上下文用量。
+  Shift+Tab 切换权限模式（边框颜色跟着变）。
+- **底部状态栏**两行：第一行是项目名与 git 分支（`*` = 有没提交的改动）· 服务商与模型 · MCP 连接情况 ·
+  上一次的输出速度 · 上下文进度条；第二行是权限模式与提醒（后台任务、快到自动压缩）。窗口窄时第一行按
+  速度 → 分支 → 服务商名 → token 数 → 进度条的顺序省掉，不会截断。
+- **自定义状态栏**（兼容 Claude Code 的 `statusLine`）：给 Claude Code 写过状态栏脚本的，heng-agent 直接用
+  `~/.claude/settings.json` 里的 `statusLine`；也可以在用户配置里写自己的（只认用户配置，项目配置里写了不生效——它会执行命令）：
+
+  ```json
+  {"settings": {"status_line": "node ~/my-statusline.js"}}
+  ```
+
+  命令从标准输入收到会话信息的 JSON（字段同 Claude Code：`model`、`workspace`、`cwd`、`session_id`、`context_window`，
+  另有 `heng` 段：服务商、权限模式、输出速度），标准输出的前三行替换状态栏第一行，可以带 ANSI 颜色；
+  每问答完刷新一次，超过 5 秒没结束算失败。`"status_line": ""` 表示不用（也不用 Claude Code 的）。
 - **拖入文件 / 粘贴截图**：消息里出现的文件绝对路径（拖入文件、**智码终端里 Ctrl+V 粘贴的截图**都是这样进来的）
   发送时自动变成附件；工作目录以外的文件先复制到 `.heng-agent/attachments/`（自带 `.gitignore`，不进仓库）。
   在 Windows Terminal 里粘贴截图用 **Alt+V**：Windows Terminal 自己处理 Ctrl+V 且只粘文字，截图到不了程序

@@ -8,6 +8,7 @@ from __future__ import annotations
 import _thread
 import json
 import threading
+import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -114,6 +115,8 @@ class Agent:
         self.usage: dict[str, int] = dict.fromkeys(USAGE_KEYS, 0)
         self.usage_by_model: dict[str, dict[str, int]] = {}  # 模型名 → 用量（存进会话文件，/stats 按模型统计）
         self.last_input_tokens = 0  # 最近一次请求的输入 token：判断是否快撑满上下文
+        #: 最近一次请求的输出速度（token/秒，从第一段输出到结束）；状态栏显示。没测到（太短、没用量）是 None
+        self.last_speed: float | None = None
         #: 每一问一个检查点：这一问开始时历史有多长、改过的文件原内容（None = 原来不存在）。/undo 用
         self.turns: list[dict[str, Any]] = []
         #: 整个会话里每个被改过的文件「第一次改之前」的内容（None = 原来不存在）。/diff 用
@@ -509,8 +512,12 @@ class Agent:
             self._phase = "model"
             if hasattr(self.client, "thinking_budget"):  # 每次请求前按当前开关设：/think 可以随时切
                 self.client.thinking_budget = self.thinking_budget if self.thinking else 0
+            first_output: float | None = None  # 第一段输出到达的时刻：速度从这里算，不含排队、读提示词的时间
+            requested = time.monotonic()
             try:
                 for event in self.client.stream(self.system_prompt(), self.messages, specs):
+                    if first_output is None and not isinstance(event, TurnEnd):
+                        first_output = time.monotonic()
                     if isinstance(event, TextDelta):
                         text.append(event.text)
                         on_event(event)
@@ -540,6 +547,15 @@ class Agent:
                 raise
             finally:
                 self._phase = None
+            output = end.usage.get("output_tokens", 0)
+            finished = time.monotonic()
+            spent = finished - first_output if first_output is not None else 0.0
+            if spent < 0.2:
+                # 有的中转站把整段回复攒齐了一次推过来（实测 80 段输出同一毫秒到达），从第一段算几乎是 0：
+                # 改按整个请求的用时算（含排队、读提示词，偏慢些），总比不显示强
+                spent = finished - requested
+            if output >= 20 and spent >= 0.2:  # 太短的回复算出来的速度没意义（一两个 token、几毫秒）
+                self.last_speed = output / spent
             for key in turn_usage:
                 turn_usage[key] += end.usage.get(key, 0)
                 self.usage[key] += end.usage.get(key, 0)
