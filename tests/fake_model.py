@@ -24,12 +24,14 @@ class FakeModel:
         self.seen_specs: list[list[dict[str, Any]]] = []  # 每次请求带的工具声明（按需加载的测试要看）
         self.thinking_budget = 0  # 智能体每次请求前会设（和真客户端一样）
         self.seen_budgets: list[int] = []
+        self.seen_systems: list[str] = []  # 每次请求的系统提示词（权限模式等会随轮次变）
 
     def stream(self, system: str, messages: list[Message], tools: list[dict[str, Any]]) -> Iterator[ModelEvent]:
         self.calls.append(copy.deepcopy(messages))
         self.seen_tools = [t["name"] for t in tools]
         self.seen_specs.append(list(tools))
         self.seen_budgets.append(self.thinking_budget)
+        self.seen_systems.append(system)
         if not self.script:
             raise AssertionError("假模型的脚本用完了：循环比预期多调了一轮模型")
         steps = self.script.pop(0)

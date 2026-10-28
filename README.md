@@ -129,7 +129,7 @@ heng-agent --provider heng --model heng-mini-0.1
 | `-p "任务"` | 非交互：执行完这一个任务就退出（需要确认的操作一律拒绝） |
 | `--permission-mode ask` | 默认：改文件、跑命令前都问你 |
 | `--permission-mode accept-edits` | 改文件不问，跑命令还问 |
-| `--permission-mode plan` | 只读：只看不改 |
+| `--permission-mode plan` | 计划模式：只读代码，交出计划等你批准，批准后再动手（见下文「计划模式」） |
 | `--permission-mode auto` | 全部不问，直接执行（只在 CI、一次性沙箱等可信环境用；仍不能读写工作目录以外） |
 | `--workdir` | 指定工作目录（默认当前目录） |
 
@@ -151,6 +151,10 @@ heng-agent --provider heng --model heng-mini-0.1
 - **会话**：`/resume` 弹出这个目录的会话列表选一个接着聊（`/resume 关键词` 按会话名、第一句话筛选）；`/rename 名字`
   给会话起名；启动时 `heng-agent -c` 直接接最近的会话。
 - **模型**：`/model` 向服务商取可用模型、方向键选，当前会话立即生效，可以顺手存成默认。
+- **计划模式**：大改动先 Shift+Tab 切到 `plan`（或 `/mode plan`）再说任务。它只读代码、想清楚后交出计划
+  （改哪些文件、怎么改、怎么验证），完整显示给你选：**开始执行**（改文件、跑命令前问你，切到 `ask`）、
+  **开始执行、改文件不问**（切到 `accept-edits`），或**继续规划**（留在计划模式，接着说要改哪里）。
+  批准后它在同一轮里接着按计划做，不用再说一遍。编辑器里（ACP）同样弹这三个选项，模式下拉框跟着变。
 - **权限规则**：确认框里选「以后都允许」，规则写进用户配置；`/permissions` 查看与增删，例如
   `/permissions allow bash(npm test)`、`/permissions deny bash(git push*)`。写法 `工具名` 或 `工具名(匹配内容)`，可用 `*`。
   **拒绝规则优先于一切**（auto 模式下也拒绝）；**bash 组合命令（`&&` `;` `|` 重定向、`$(...)` 等）不适用允许规则**，

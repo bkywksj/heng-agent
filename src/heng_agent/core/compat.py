@@ -85,7 +85,7 @@ def convert_claude_rule(rule: str) -> list[str] | None:
 HENG_TO_CLAUDE = {
     "bash": "Bash", "read_file": "Read", "write_file": "Write", "edit_file": "Edit", "glob": "Glob",
     "grep": "Grep", "web_fetch": "WebFetch", "todo": "TodoWrite", "task": "Task", "bash_output": "BashOutput",
-    "kill_task": "KillShell",
+    "kill_task": "KillShell", "exit_plan_mode": "ExitPlanMode",
 }  # fmt: skip
 #: Claude Code 的钩子事件 → heng-agent 的（其余的如 Notification、SubagentStop、PreCompact 暂不支持）
 CLAUDE_EVENTS = {

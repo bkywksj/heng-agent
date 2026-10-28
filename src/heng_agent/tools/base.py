@@ -63,9 +63,11 @@ class Tool(ABC):
 
 def builtin_tools() -> list[Tool]:
     from heng_agent.tools.files import EditFile, ReadFile, WriteFile
+    from heng_agent.tools.plan import ExitPlanMode
     from heng_agent.tools.search import Glob, Grep
     from heng_agent.tools.shell import Bash, BashOutput, KillTask
     from heng_agent.tools.todo import Todo
     from heng_agent.tools.web import WebFetch
 
-    return [ReadFile(), Glob(), Grep(), WriteFile(), EditFile(), Bash(), BashOutput(), KillTask(), Todo(), WebFetch()]
+    return [ReadFile(), Glob(), Grep(), WriteFile(), EditFile(), Bash(), BashOutput(), KillTask(), Todo(), WebFetch(),
+            ExitPlanMode()]  # fmt: skip

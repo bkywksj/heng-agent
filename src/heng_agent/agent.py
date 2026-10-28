@@ -15,7 +15,7 @@ from typing import Any
 
 from heng_agent.agents import AgentDef, discover_agents
 from heng_agent.compaction import compact as compact_history
-from heng_agent.context import build_system_prompt, nested_memory
+from heng_agent.context import MODE_NOTES, build_system_prompt, mode_section, nested_memory
 from heng_agent.core.config import Settings
 from heng_agent.core.errors import AgentError, ModelError
 from heng_agent.core.types import (
@@ -38,6 +38,8 @@ from heng_agent.permissions import Approver, Permissions
 from heng_agent.session import SessionStore
 from heng_agent.tools.base import Tool, ToolContext, builtin_tools
 from heng_agent.tools.paths import display
+from heng_agent.tools.plan import APPROVED_MODE
+from heng_agent.tools.plan import NAME as EXIT_PLAN
 from heng_agent.tools.shell import clip
 from heng_agent.tools.skill import SkillTool, discover_skills
 from heng_agent.tools.subagent import SubAgentTool
@@ -232,22 +234,46 @@ class Agent:
 
         按需加载时：内置工具 + tool_search + 已加载的 MCP 工具；否则全部（不含 tool_search）。
         """
+        hidden = {"tool_search"} if not self.defer_mcp() else set()
+        if self.permissions.mode != "plan":
+            hidden.add(EXIT_PLAN)  # 交计划只在计划模式里有意义：别的模式里给了，模型会拿它来「请示」
         if not self.defer_mcp():
-            return [t.spec() for t in self.tools.values() if t.name != "tool_search"]
-        specs = [t.spec() for t in self.tools.values() if t.kind != "mcp"]
+            return [t.spec() for t in self.tools.values() if t.name not in hidden]
+        specs = [t.spec() for t in self.tools.values() if t.kind != "mcp" and t.name not in hidden]
         return specs + [self.tools[n].spec() for n in self.loaded_mcp if n in self.tools]
 
     def system_prompt(self) -> str:
-        """发给模型的系统提示词；按需加载 MCP 工具时，告诉模型接了哪些服务、怎么用。"""
-        if not self.defer_mcp():
-            return self.system
-        counts: dict[str, int] = {}
-        for tool in self._mcp_tools():
-            server = tool.name.split("__")[1] if tool.name.count("__") >= 2 else "?"
-            counts[server] = counts.get(server, 0) + 1
-        servers = "、".join(f"{name}（{n} 个）" for name, n in counts.items())
-        return (f"{self.system}\n\n# 外部工具（MCP）\n\n已接入：{servers}。这些工具太多，默认没有加载；"
-                "用户的任务可能用得上时，先用 tool_search 按关键词搜，搜到的下一步就能调用。")  # fmt: skip
+        """发给模型的系统提示词：固定部分 + 当前权限模式（随 Shift+Tab、批准计划变）+ 按需加载 MCP 时的说明。
+
+        权限模式以前写死在启动时生成的那段里，中途切了模式模型还以为是原来的；现在每轮按当前模式生成。
+        """
+        parts = [self.system, mode_section(self.permissions.mode)]
+        if self.defer_mcp():
+            counts: dict[str, int] = {}
+            for tool in self._mcp_tools():
+                server = tool.name.split("__")[1] if tool.name.count("__") >= 2 else "?"
+                counts[server] = counts.get(server, 0) + 1
+            servers = "、".join(f"{name}（{n} 个）" for name, n in counts.items())
+            parts.append(f"# 外部工具（MCP）\n\n已接入：{servers}。这些工具太多，默认没有加载；"
+                         "用户的任务可能用得上时，先用 tool_search 按关键词搜，搜到的下一步就能调用。")  # fmt: skip
+        return "\n\n".join(parts)
+
+    def _present_plan(self, tool: Tool, args: dict[str, Any], approve: Approver,
+                      on_event: Callable[[AgentEvent], None]) -> ToolResult:  # fmt: skip
+        """模型交出计划：请用户批准，批准就切到用户选的模式、让模型接着做，不批准就留在计划模式等用户说怎么改。"""
+        if self.permissions.mode != "plan":
+            return ToolResult("现在不是计划模式，不用请示：直接按计划做。")
+        if not str(args.get("plan", "")).strip():
+            return ToolResult("plan 是空的：把要改哪些文件、怎么改、怎么验证写清楚再交。", is_error=True)
+        answer = approve(tool, args)
+        mode = APPROVED_MODE.get(answer)
+        if mode is None:
+            return ToolResult("用户没有批准这个计划，还在计划模式。先停下，等用户说要怎么改；"
+                              "不要再调 exit_plan_mode，也不要尝试改文件、跑命令。")  # fmt: skip
+        self.permissions.mode = mode  # type: ignore[assignment]
+        on_event(Notice(f"计划已批准，权限模式切到 {mode}：开始执行"))
+        return ToolResult(f"用户批准了计划，权限模式已切到 {mode}（{MODE_NOTES[mode]}）。现在按计划开始做，"
+                          "做完一步验证一步；计划之外的大改动先问用户。")  # fmt: skip
 
     def _snapshot(self, path: Path) -> None:
         """改文件前由工具调用：同一问里只记第一次改之前的内容；另记一份整个会话里「第一次改之前」的内容给 /diff。
@@ -388,6 +414,8 @@ class Agent:
         elif (pre := self.hooks.run("pre_tool", call.name, call.input)).blocked:
             # 钩子先于确认框（和 Claude Code 一样）：要被安全钩子拦下的调用，不该先问用户「允许吗」
             result = ToolResult(pre.message, is_error=True)
+        elif call.name == EXIT_PLAN:  # 交计划：不走一般的「允许 / 拒绝」，由用户选按哪种模式执行
+            result = self._present_plan(tool, call.input, approve, on_event)
         elif not self.permissions.check(tool, call.input, approve):
             result, denied = ToolResult(DENIED, is_error=True), True
         else:

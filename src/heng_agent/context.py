@@ -105,11 +105,33 @@ def load_memories(settings: Settings) -> list[tuple[Path, str]]:
     return loaded
 
 
+#: 各权限模式对模型的说明（系统提示词、批准计划后的工具结果里用）
+MODE_NOTES = {
+    "ask": "改文件、跑命令前都会问用户",
+    "accept-edits": "改文件不问，跑命令还会问用户",
+    "plan": "计划模式：只能读文件、搜索，改文件和跑命令会被拒绝",
+    "auto": "全部直接执行，不问用户",
+}
+
+PLAN_GUIDE = (
+    "现在是计划模式：先把相关代码读透（读文件、搜索），不要尝试改文件或跑命令——会被拒绝。"
+    "想清楚之后用 exit_plan_mode 交出计划：要改哪些文件、每处怎么改、按什么顺序、怎么验证（跑哪些测试）。"
+    "用户批准后权限模式会切到可执行的模式，你在同一轮里接着按计划做；用户没批准就停下，等用户说要怎么改。"
+    "如果用户只是问问题、不需要改代码，直接回答，不用交计划。"
+)
+
+
+def mode_section(mode: str) -> str:
+    """系统提示词里的权限模式一段：每轮按当前模式生成（Shift+Tab 切换、批准计划都会变）。"""
+    text = f"# 权限模式\n\n当前：{mode}（{MODE_NOTES.get(mode, mode)}）"
+    return f"{text}\n\n{PLAN_GUIDE}" if mode == "plan" else text
+
+
 def build_system_prompt(settings: Settings, skills: dict[str, Skill] | None = None) -> str:
+    """系统提示词的固定部分。权限模式会中途变，不写在这里，由 Agent.system_prompt 每轮加上（见 mode_section）。"""
     env = (
         f"# 运行环境\n\n- 工作目录：{settings.workdir}\n- 系统：{platform.system()} {platform.release()}\n"
-        f"- 命令行：{Path(shell_argv('')[0]).name}\n- 今天：{_dt.date.today().isoformat()}\n"
-        f"- 权限模式：{settings.permission_mode}"
+        f"- 命令行：{Path(shell_argv('')[0]).name}\n- 今天：{_dt.date.today().isoformat()}"
     )
     parts = [BASE_PROMPT, env]
     memories = load_memories(settings)

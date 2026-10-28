@@ -53,7 +53,7 @@ TOOL_KIND = {
     "bash": ("execute", "执行"), "bash_output": ("execute", "查看输出"), "kill_bash": ("execute", "结束命令"),
     "glob": ("search", "查找文件"), "grep": ("search", "搜索"), "web_fetch": ("fetch", "抓取网页"),
     "web_search": ("fetch", "搜索网页"), "todo": ("think", "任务清单"), "task": ("think", "子任务"),
-    "skill": ("read", "读取技能"), "tool_search": ("search", "查找工具"),
+    "skill": ("read", "读取技能"), "tool_search": ("search", "查找工具"), "exit_plan_mode": ("switch_mode", "交出计划"),
 }  # fmt: skip
 TOOL_RESULT_CHARS = 4000  # 工具结果回给客户端显示的部分（完整的照样给模型）
 PLAN_STATUS = {"pending": "pending", "in_progress": "in_progress", "done": "completed"}
@@ -149,6 +149,8 @@ def tool_preview(name: str, args: dict[str, Any]) -> list[Any] | None:
         return [acp.tool_diff_content(path, str(args.get("new_string", "")), str(args.get("old_string", "")))]
     if name == "write_file" and path:
         return [acp.tool_diff_content(path, str(args.get("content", "")), None)]
+    if name == "exit_plan_mode":  # 交计划：确认框里要看得到计划本身
+        return [acp.tool_content(acp.text_block(str(args.get("plan", ""))))]
     return None
 
 
@@ -341,10 +343,14 @@ class HengAgent(acp.Agent):
 
         pumping = asyncio.create_task(pump())
         stop: str = "end_turn"
+        mode_before = agent.permissions.mode
         try:
             done = await asyncio.to_thread(agent.run, text, on_event, approve, images or None)
             if isinstance(done, TurnDone) and done.rounds >= agent.settings.max_rounds:
                 stop = "max_turn_requests"
+            if agent.permissions.mode != mode_before:  # 批准了计划、模式变了：客户端的模式下拉框要跟着变
+                send(schema.CurrentModeUpdate(session_update="current_mode_update",
+                                              current_mode_id=agent.permissions.mode))  # fmt: skip
         except KeyboardInterrupt:
             stop = "cancelled"
         except AgentError as exc:
@@ -355,10 +361,14 @@ class HengAgent(acp.Agent):
         return schema.PromptResponse(stop_reason=stop)  # type: ignore[arg-type]
 
     async def _ask_permission(self, session_id: str, request: Any) -> str:
+        if getattr(request, "kind", None) == "switch_mode":  # 交计划：三个选项的意思是「按哪种模式开始执行」
+            names = ("开始执行（改文件、跑命令前问我）", "开始执行（改文件不问）", "继续规划")
+        else:
+            names = ("允许这一次", "本会话都允许", "拒绝")
         options = [
-            schema.PermissionOption(option_id="once", name="允许这一次", kind="allow_once"),
-            schema.PermissionOption(option_id="always", name="本会话都允许", kind="allow_always"),
-            schema.PermissionOption(option_id="deny", name="拒绝", kind="reject_once"),
+            schema.PermissionOption(option_id="once", name=names[0], kind="allow_once"),
+            schema.PermissionOption(option_id="always", name=names[1], kind="allow_always"),
+            schema.PermissionOption(option_id="deny", name=names[2], kind="reject_once"),
         ]
         response = await self.conn.request_permission(session_id=session_id, tool_call=request, options=options)
         outcome = response.outcome

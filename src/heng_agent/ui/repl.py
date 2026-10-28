@@ -55,6 +55,7 @@ from heng_agent.permissions import Rules
 from heng_agent.session import SessionStore
 from heng_agent.tools.background import describe
 from heng_agent.tools.base import Tool
+from heng_agent.tools.plan import NAME as EXIT_PLAN
 from heng_agent.tools.shell import clip, run_command, shell_argv
 from heng_agent.tools.skill import skill_source
 from heng_agent.tools.subagent import SubAgentTool
@@ -105,7 +106,7 @@ HELP = """查看状态
 
 模型与权限
   /provider [名字]            切换服务商；/model [名字] 切换模型；/config provider 引导配置服务商与 API
-  /mode ask|accept-edits|plan|auto   每次问 / 改文件不问 / 只读 / 全部不问（Shift+Tab 循环切换）
+  /mode ask|accept-edits|plan|auto   每次问 / 改文件不问 / 先出计划 / 全部不问（Shift+Tab 循环切换）
   /think [on|off|预算|show]    思考模式：先深度思考再回答（难题用）
   /permissions                持久的允许 / 拒绝规则：allow bash(npm test)、deny、remove
   /config                     查看与修改配置
@@ -132,7 +133,7 @@ MAX_THUMBNAILS = 3
 TOOL_LABELS = {
     "read_file": "读取", "glob": "找文件", "grep": "搜索", "write_file": "写入", "edit_file": "修改",
     "bash": "运行", "todo": "任务清单", "web_fetch": "读网页", "skill": "用技能", "task": "派子任务",
-    "bash_output": "看输出", "kill_task": "停任务", "tool_search": "找工具",
+    "bash_output": "看输出", "kill_task": "停任务", "tool_search": "找工具", "exit_plan_mode": "交出计划",
 }  # fmt: skip
 
 
@@ -616,9 +617,36 @@ class Repl:
             self._spin(f"{tool_label(tool.name)}…", "ESC 中断 · Ctrl+B 转后台" if foreground_bash else "ESC 中断")
         return answer
 
+    def _ask_plan(self, args: dict[str, Any]) -> str:
+        """模型交出计划：完整显示（Markdown），让用户选按哪种模式开始执行，或者继续规划。
+
+        回答沿用确认对话的 once / always / deny（Agent 按它切模式，ACP 客户端也是这三种）。
+        """
+        c = self.console
+        c.print(Panel(Markdown(str(args.get("plan", ""))), title="[bold]计划[/]", border_style="cyan", padding=(0, 1)))
+        with self._pause_watcher():
+            picked = self._choose("按这个计划开始吗？", [
+                Option("once", "开始执行：改文件、跑命令前问我", "y", "切到 ask"),
+                Option("always", "开始执行：改文件不问，跑命令还问", "a", "切到 accept-edits"),
+                Option("deny", "继续规划", "n", "留在计划模式，接着说要改哪里（ESC 同样）"),
+            ])  # fmt: skip
+            if picked is _PLAIN:
+                while True:  # 选择器用不了的终端：退回打字
+                    raw = c.input("开始吗？[bold]y[/] 执行（改前问我）/ [bold]a[/] 执行（改文件不问）/ "
+                                  "[bold]n[/] 继续规划 > ").strip().lower()  # fmt: skip
+                    picked = {"y": "once", "yes": "once", "": "once", "a": "always", "n": "deny", "no": "deny"}.get(raw)
+                    if picked:
+                        break
+        answer = str(picked or "deny")  # ESC = 继续规划
+        if answer == "deny":
+            c.print("[dim]→ 继续规划：说说要怎么改，它会接着完善计划[/]")
+        return answer
+
     def _ask_approval(self, tool: Tool, args: dict[str, Any]) -> Any:
         self._unspin()  # 要问用户了：先停动画，否则会和输入提示纠缠在一起
         c = self.console
+        if tool.name == EXIT_PLAN:
+            return self._ask_plan(args)
         if tool.name == "edit_file":
             diff = difflib.unified_diff(
                 str(args.get("old_string", "")).splitlines(), str(args.get("new_string", "")).splitlines(),
