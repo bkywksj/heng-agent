@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime as _dt
 import difflib
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -26,10 +27,21 @@ def text_of(message: Message) -> str:
 
 def last_reply(messages: list[Message]) -> str:
     """最近一条有文字的助手回复。"""
-    for m in reversed(messages):
-        if m.get("role") == "assistant" and text_of(m).strip():
-            return text_of(m).strip()
-    return ""
+    found = replies(messages)
+    return found[0] if found else ""
+
+
+def replies(messages: list[Message]) -> list[str]:
+    """所有有文字的助手回复，最近的在前（/copy 2 = 倒数第二条）。"""
+    return [text_of(m).strip() for m in reversed(messages) if m.get("role") == "assistant" and text_of(m).strip()]
+
+
+_FENCE = re.compile(r"^( {0,3})(`{3,}|~{3,})[ \t]*([^\s`]*)[^\n]*\n(.*?)^\1\2[ \t]*$", re.MULTILINE | re.DOTALL)
+
+
+def code_blocks(text: str) -> list[tuple[str, str]]:
+    """回复里的代码块：(语言, 代码)。只认 ``` / ~~~ 围起来的（模型几乎只这么写）；收尾的围栏要和开头的一样。"""
+    return [(m.group(3), m.group(4).rstrip("\n")) for m in _FENCE.finditer(text)]
 
 
 # ---------- /copy ----------

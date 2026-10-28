@@ -251,12 +251,33 @@ def test_enter_runs_commands_tab_completes(tmp_path: Path) -> None:
     assert run("/conf|\t|prov|\r", hints) == "/config provider"  # Tab 补全加空格、接着提示参数，选参数后 Enter 执行
 
 
-def test_assistant_reply_is_indented_without_marker(tmp_path: Path) -> None:
-    """回复不加图标、整段缩进两格（提问左侧是竖条，两者一眼分得开）；换行后仍然对齐。"""
-    repl, console = _repl(tmp_path)
-    console.print(repl._reply("第一段\n\n- 要点"))
-    lines = [line for line in console.export_text().splitlines() if line.strip()]
-    assert lines[0].rstrip() == "  第一段" and all(line.startswith("  ") for line in lines)  # 表格会补齐行尾空格
+def test_assistant_reply_is_flush_left_without_trailing_spaces(tmp_path: Path) -> None:
+    """回复顶格、行尾不带空格、代码块不铺背景：鼠标拖选复制出来是干净的（以前每行前缩进两格、后面补满空格，
+    代码块左边再多一格，Python 贴进去缩进就错了——用户反馈）。"""
+    repl, _ = _repl(tmp_path)
+    console = Console(record=True, width=60, force_terminal=False)
+    console.print(repl._reply("第一段" * 30 + "\n\n```python\ndef f():\n    return 1\n```\n\n- 要点"))
+    lines = console.export_text().splitlines()
+    assert lines[0].startswith("第一段") and "def f():" in lines and "    return 1" in lines
+    assert all(line == line.rstrip() for line in lines)
+
+
+def test_reply_code_block_keeps_blank_lines_and_table_has_no_double_gap(tmp_path: Path) -> None:
+    """代码块上面有一行灰字写语言（没了底色要能和正文分开）；代码里连着的空行原样保留；
+    表格上下的边框空行不和块之间的空行叠成两行。"""
+    repl, _ = _repl(tmp_path)
+    console = Console(record=True, width=60, force_terminal=False)
+    md = "介绍\n\n```python\ndef f():\n\n\n    return 1\n```\n\n- 一\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n结尾"
+    console.print(repl._reply(md))
+    lines = console.export_text().splitlines()
+    i = lines.index("── python")
+    assert lines[i + 1 : i + 5] == ["def f():", "", "", "    return 1"]
+    tail = lines[lines.index(" • 一") :]
+    assert all(tail[k] or tail[k + 1] for k in range(len(tail) - 1))  # 列表之后不再有连着两行空行
+    # 边写边打印时一段列表单独渲染：前后不带空行（不然和段落之间的空行叠成两行，真实终端里看到的）
+    console = Console(record=True, width=60, force_terminal=False)
+    console.print(repl._reply("- 一\n- 二"))
+    assert console.export_text().splitlines() == [" • 一", " • 二"]
 
 
 # ---------- 发送时吸收绝对路径（智码 Ctrl+V 截图、拖入文件、粘贴标记被吞） ----------

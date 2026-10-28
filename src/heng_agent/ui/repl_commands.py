@@ -11,7 +11,6 @@ import time
 from typing import Any
 
 from rich.cells import cell_len
-from rich.markdown import Markdown
 from rich.markup import escape
 from rich.panel import Panel
 
@@ -29,12 +28,15 @@ from heng_agent.ui.doctor import report as doctor_report
 from heng_agent.ui.render import (
     _PLAIN,
     MIN_THINKING_BUDGET,
+    ReplyMarkdown,
     edit_in_editor,
     file_link,
 )
 from heng_agent.ui.select import Option
 from heng_agent.ui.session_tools import (
+    code_blocks,
     copy_text,
+    replies,
 )
 
 
@@ -206,6 +208,42 @@ class CommandsMixin:
         if a.effort and profile is not None and profile.protocol == "openai" and a.effort in ("xhigh", "max"):
             c.print("[dim]OpenAI 协议只有 low / medium / high：按 high 发[/]")
 
+    def copy_command(self, rest: str) -> None:
+        """/copy [N]：复制倒数第 N 条回复（默认 1）的原文（Markdown，不带屏幕上的换行与空格）。
+
+        回复里有代码块时先让你选：整条回复，还是其中一段代码（照 Claude Code）。选择器用不了的终端直接复制整条。"""
+        c = self.console
+        arg = rest.strip()
+        if arg and not arg.isdigit():
+            c.print("用法：/copy [N]——N 是倒数第几条回复，默认 1（上一条）")
+            return
+        n = int(arg or 1)
+        found = replies(self.agent.messages)
+        if not found:
+            c.print("还没有可以复制的回复。")
+            return
+        if not 1 <= n <= len(found):
+            c.print(f"[yellow]只有 {len(found)} 条回复，没有倒数第 {n} 条[/]")
+            return
+        reply = found[n - 1]
+        text, what = reply, "整条回复"
+        blocks = code_blocks(reply)
+        if blocks:
+            options = [Option("all", "整条回复", detail=f"{len(reply.splitlines())} 行")]
+            for i, (lang, code) in enumerate(blocks):
+                first = next((line.strip() for line in code.splitlines() if line.strip()), "")
+                preview = first if cell_len(first) <= 50 else first[:48] + "…"
+                options.append(Option(str(i), f"代码 {i + 1}{f'（{lang}）' if lang else ''}：{preview}",
+                                      detail=f"{len(code.splitlines())} 行"))  # fmt: skip
+            picked = self._choose("复制哪一段（ESC 取消）", options)
+            if picked is None:
+                return
+            if isinstance(picked, str) and picked != "all":
+                lang, text = blocks[int(picked)]
+                what = f"代码 {int(picked) + 1}"
+        ok, note = copy_text(text)
+        c.print(f"[{'green' if ok else 'red'}]{escape(note)}[/]" + (f"[dim]（{what}）[/]" if ok else ""))
+
     def btw_command(self, rest: str) -> None:
         """/btw 问题：旁支问题。在后台线程里问（不打断正在进行的回答），答完打印在一个框里，不进对话历史。"""
         a, c = self.agent, self.console
@@ -229,7 +267,7 @@ class CommandsMixin:
                 self._btw_show(f"[red]旁支问题没问成：{escape(str(exc))}[/]")
                 return
             title = question if len(question) <= 40 else question[:39] + "…"
-            self._btw_show(Panel(Markdown(answer or "（没有回答）"), title=f"[bold]旁支问题：{escape(title)}[/]",
+            self._btw_show(Panel(ReplyMarkdown(answer or "（没有回答）"), title=f"[bold]旁支问题：{escape(title)}[/]",
                                  subtitle="[dim]不进对话历史[/]", border_style="magenta", padding=(0, 1)))  # fmt: skip
             self._btw_log.append((question, answer))  # 显示之后再记：记上了就表示已经显示出来
 

@@ -36,7 +36,7 @@ BUILTIN_HELP = {
     "terminal-setup": "让 Windows Terminal 的 Shift+Enter 能换行",
     "context": "上下文被什么占着",
     "diff": "这次会话改过的文件",
-    "copy": "复制上一条回复",
+    "copy": "复制回复（/copy 2 = 倒数第二条；有代码块时可以只复制一段）",
     "export": "把会话导出成 Markdown",
     "memory": "读进来的说明文件（优先级、各占多少），edit 修改",
     "doctor": "检查运行环境（copy：连同日志复制下来，反馈问题用）",
@@ -98,7 +98,7 @@ STYLE = Style.from_dict(
 
 
 #: 不带参数的命令：补全后按 Enter 直接执行，Tab 也不加空格
-NO_ARGS = frozenset({"help", "clear", "undo", "todo", "cost", "skills", "rewind", "copy", "context", "diff",
+NO_ARGS = frozenset({"help", "clear", "undo", "todo", "cost", "skills", "rewind", "context", "diff",
                      "doctor", "exit", "quit", "terminal-setup", "usage", "status", "stats", "hooks", "todos",
                      "version", "bashes"})  # fmt: skip
 #: 必须带参数的命令：Enter 只补全（加空格等你输参数），不执行

@@ -258,3 +258,52 @@ def test_piped_stdin(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(cli.sys, "stdin", Piped("只有管道内容"))
     _, model = _print_mode(tmp_path, monkeypatch, [["好"]], "-p")
     assert model.calls[0][0]["content"][0]["text"] == "只有管道内容"  # 只写 -p：管道内容就是问题
+
+
+def _copy_repl(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, picked: object) -> tuple[Repl, list[str], Console]:
+    from heng_agent.ui import repl_commands
+
+    console = Console(record=True, width=100, force_terminal=False)
+    repl = Repl(Agent(Settings(workdir=tmp_path, home=tmp_path / "h"), FakeModel([])), console=console)
+    repl.agent.messages = [
+        {"role": "user", "content": [{"type": "text", "text": "问一"}]},
+        {"role": "assistant", "content": [{"type": "text", "text": "第一条回复"}]},
+        {"role": "user", "content": [{"type": "text", "text": "问二"}]},
+        {
+            "role": "assistant",
+            "content": [{"type": "text", "text": "看代码：\n\n```python\ndef f():\n    return 1\n```\n"}],
+        },
+    ]
+    copied: list[str] = []
+    monkeypatch.setattr(repl_commands, "copy_text", lambda text: (copied.append(text), (True, "已复制"))[1])
+    repl._choose = lambda title, options, default=0: picked  # type: ignore[method-assign]
+    return repl, copied, console
+
+
+def test_copy_picks_a_code_block(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """回复里有代码块：选其中一段，只复制代码本身（不带围栏、不带屏幕上的缩进）。"""
+    repl, copied, console = _copy_repl(tmp_path, monkeypatch, "0")
+    repl.handle_command("/copy")
+    assert copied == ["def f():\n    return 1"] and "代码 1" in console.export_text()
+
+
+def test_copy_whole_reply_and_nth_reply(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repl, copied, console = _copy_repl(tmp_path, monkeypatch, "all")
+    repl.handle_command("/copy")
+    repl.handle_command("/copy 2")  # 倒数第二条：没有代码块，不用选直接复制
+    repl.handle_command("/copy 5")
+    repl.handle_command("/copy abc")
+    assert copied[0].startswith("看代码") and copied[1] == "第一条回复" and len(copied) == 2
+    text = console.export_text()
+    assert "只有 2 条回复" in text and "用法：/copy [N]" in text
+
+
+def test_copy_cancelled_copies_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repl, copied, _ = _copy_repl(tmp_path, monkeypatch, None)
+    repl.handle_command("/copy")
+    assert copied == []
+
+
+def test_code_blocks_parsing() -> None:
+    blocks = session_tools.code_blocks("a\n```js\nx()\n```\n中间\n~~~\n```不是结尾\n~~~\n````md\n```inner```\n````")
+    assert blocks == [("js", "x()"), ("", "```不是结尾"), ("md", "```inner```")]

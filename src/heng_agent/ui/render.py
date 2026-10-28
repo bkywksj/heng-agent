@@ -9,9 +9,13 @@ import re
 import sys
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
+from rich import markdown as _md
 from rich.markup import escape
+from rich.segment import Segment
+from rich.syntax import Syntax
+from rich.text import Text
 
 from heng_agent.attachments import ABS_PATH, PATH_STOP
 from heng_agent.core.types import TurnDone
@@ -211,7 +215,7 @@ def turn_summary(event: TurnDone, started: float) -> str:
     took = f"{spent:.1f} 秒" if spent < 60 else f"{int(spent // 60)} 分 {int(spent % 60)} 秒"
     tokens = f"输入 {human_tokens(u.get('input_tokens', 0))} / 输出 {human_tokens(u.get('output_tokens', 0))}"
     when = _dt.datetime.fromtimestamp(started).strftime("%H:%M")
-    return f"  [dim]{when} · 用时 {took} · {event.rounds} 轮 · {tokens}[/]"
+    return f"[dim]{when} · 用时 {took} · {event.rounds} 轮 · {tokens}[/]"
 
 
 def elapsed_text(seconds: float) -> str:
@@ -242,3 +246,76 @@ class Ticker:
             timing += f" · 超时 {elapsed_text(self.limit)}"
         hint = f" · {escape(self.hint)}" if self.hint else ""
         return Text.from_markup(f"[cyan]{escape(self.text)}[/] [dim]({timing}){hint}[/]")
+
+
+# ---------- 回复正文：顶格、行尾不带空格（鼠标拖选复制出来是干净的） ----------
+
+
+class _PlainCodeBlock(_md.CodeBlock):
+    """代码块：只上语法颜色，不铺背景、不加内边距。
+
+    rich 默认给代码块铺满整行的底色，为此每行左边补 1 格、右边补空格到终端宽度——鼠标拖选复制出来每行
+    前后都是空格，Python、YAML 贴进去缩进就错了（用户反馈复制问题时实测）。"""
+
+    def __rich_console__(self, console: Any, options: Any) -> Any:
+        # 没了底色，代码块和正文就分不开了（bash 这类几乎没有颜色可上，整块白字，真实终端里实测）：
+        # 上面加一行灰字写语言。拖选代码时从下一行开始选就不会带上它；/copy 能只复制代码
+        label = "" if self.lexer_name == "text" else self.lexer_name
+        yield Text(f"── {label or '代码'}", style="grey42")
+        yield Syntax(str(self.text).rstrip(), self.lexer_name, theme=self.theme, word_wrap=True, padding=0,
+                     background_color="default")  # fmt: skip
+
+
+class ReplyMarkdown(_md.Markdown):
+    """AI 回复用的 Markdown：代码块不铺背景。"""
+
+    elements: ClassVar[dict[str, Any]] = {
+        **_md.Markdown.elements,
+        "fence": _PlainCodeBlock,
+        "code_block": _PlainCodeBlock,
+    }
+
+
+class Trimmed:
+    """把里面的内容逐行去掉行尾空格再输出。
+
+    rich 排版时把每行用空格补齐到终端宽度（段落、列表、表格都这样）：屏幕上看不出来，复制出来每行后面一长串空格。"""
+
+    def __init__(self, renderable: Any) -> None:
+        self.renderable = renderable
+
+    def __rich_console__(self, console: Any, options: Any) -> Any:
+        lines = [list(line) for line in console.render_lines(self.renderable, options, pad=False)]
+        # 开头、结尾的空行去掉：单独一段列表 rich 会前后各空一行；回复边写边打印时每段单独渲染，
+        # 和段落之间本来就有的空行叠成两行（真实终端里看到「主要特点：」和下面的列表之间空了两行）。
+        # 段落之间空几行由调用方定
+        while lines and _is_empty(lines, 0):
+            lines.pop(0)
+        while lines and _is_empty(lines, len(lines) - 1):
+            lines.pop()
+        for i, segments in enumerate(lines):
+            # 表格上下的边框行是一行带边框颜色的空格，紧挨着块与块之间的空行，叠成两行空行：去掉它。
+            # 别的空行（包括代码里的空行）一律保留——代码里连着两行空行是内容
+            if _is_border_blank(segments) and (_is_empty(lines, i - 1) or _is_empty(lines, i + 1)):
+                continue
+            while segments and not segments[-1].control:
+                last = segments[-1]
+                if last.style is not None and last.style.bgcolor is not None and not last.style.bgcolor.is_default:
+                    break  # 带底色的（行内代码这类）：空格是底色的一部分，不动
+                text = last.text.rstrip(" ")
+                if text:
+                    segments[-1] = Segment(text, last.style)
+                    break
+                segments.pop()
+            yield from segments
+            yield Segment.line()
+
+
+def _is_border_blank(segments: list[Segment]) -> bool:
+    """只有空格、而且带颜色（表格边框）的一行。"""
+    return bool(segments) and all(not seg.text.strip() for seg in segments) and any(seg.style for seg in segments)
+
+
+def _is_empty(lines: list[list[Segment]], i: int) -> bool:
+    """第 i 行是真正的空行（排版留的）；超出范围也算（开头、结尾不需要再空）。"""
+    return not 0 <= i < len(lines) or not any(seg.text.strip(" ") for seg in lines[i])

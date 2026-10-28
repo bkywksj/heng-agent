@@ -15,11 +15,9 @@ from prompt_toolkit.application import get_app_or_none
 from prompt_toolkit.history import FileHistory
 from rich.console import Console
 from rich.live import Live
-from rich.markdown import Markdown
 from rich.markup import escape
 from rich.panel import Panel
 from rich.syntax import Syntax
-from rich.table import Table
 from rich.text import Text
 
 from heng_agent import __version__, worktree
@@ -68,7 +66,9 @@ from heng_agent.ui.render import (
     ALIASES,
     MAX_THUMBNAILS,
     PROMPT_BAR,
+    ReplyMarkdown,
     Ticker,
+    Trimmed,
     _stdin_is_terminal,
     autolink,
     brief_result,
@@ -87,10 +87,8 @@ from heng_agent.ui.repl_session import SessionMixin
 from heng_agent.ui.repl_turn import TurnMixin
 from heng_agent.ui.select import Option, ask_line, choose
 from heng_agent.ui.session_tools import (
-    copy_text,
     default_export_path,
     export_markdown,
-    last_reply,
     session_diff,
 )
 from heng_agent.ui.sixel import encode as sixel_encode
@@ -118,7 +116,7 @@ HELP = """查看状态
   /compact [要求]             手动压缩历史（快撑满时会自动压缩）
   /undo                       撤销上一问：恢复它改过的文件，对话也退回去（bash 造成的改动除外）
   /rewind                     选一问，对话与代码一起回到它之前（空输入框里双击 ESC 同样）
-  /copy                       把上一条回复复制到剪贴板
+  /copy [N]                   复制上一条（或倒数第 N 条）回复；有代码块时可以只复制其中一段
   /exit                       退出（/quit、Ctrl+D 同样）
 
 模型与权限
@@ -251,18 +249,15 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin, Tu
             self._reply_started = False
 
     @staticmethod
-    def _reply(text: str, first: bool = True) -> Table:
-        """AI 的一段回复：不加图标，整段缩进两格（和提问左侧的竖条区分开；工具调用是灰色 ●），换行后文字仍然对齐。
+    def _reply(text: str, first: bool = True) -> Any:
+        """AI 的一段回复：顶格写，不加图标（提问左侧是青色竖条，工具调用是灰色 ●，靠这个区分）。
 
+        以前整段缩进两格，再加上 rich 把每行补齐到终端宽度、代码块铺底色：鼠标拖选复制出来每行前后都是空格，
+        Python、YAML 贴进去缩进就错了（用户反馈）。现在顶格、行尾空格去掉、代码块不铺背景。
+        rich 的 Markdown 段落本来就是放不下折到下一行（以前表格单元格默认截断，中文长串会丢字）。
         裸网址转成链接（Windows Terminal 里 Ctrl+点击就能打开）。first 保留给调用方，现在每段画法一样。
         """
-        grid = Table.grid(padding=(0, 1))
-        grid.add_column(width=1, no_wrap=True)
-        # overflow="fold"：放不下就折到下一行。默认是截断加省略号——中文之间没有空格，rich 把一长串汉字当一个「词」，
-        # 一行放不下时整串被截掉（「在这些场景中，CPU」变成「在这 …」，字丢了；真实终端里看长回复时发现）
-        grid.add_column(ratio=1, overflow="fold")
-        grid.add_row("", Markdown(autolink(text)))
-        return grid
+        return Trimmed(ReplyMarkdown(autolink(text)))
 
     def _model_label(self) -> str:
         p = getattr(self.agent.client, "profile", None)
@@ -817,12 +812,7 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin, Tu
         elif cmd == "/compact":
             a.compact(self.on_event, force=True, instruction=rest)
         elif cmd == "/copy":
-            reply = last_reply(a.messages)
-            if not reply:
-                c.print("还没有可以复制的回复。")
-            else:
-                ok, note = copy_text(reply)
-                c.print(f"[{'green' if ok else 'red'}]{escape(note)}[/]")
+            self.copy_command(rest)
         elif cmd == "/export":
             session_id = a.session.id if a.session else ""
             path = Path(rest).expanduser() if rest else default_export_path(a.settings.workdir, session_id)

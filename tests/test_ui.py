@@ -223,7 +223,7 @@ def test_turn_summary_has_time_and_duration(monkeypatch: pytest.MonkeyPatch) -> 
     started = dt.datetime(2026, 10, 28, 21, 34, 5).timestamp()
     monkeypatch.setattr(render.time, "time", lambda: started + 8.14)
     line = render.turn_summary(TurnDone({"input_tokens": 5682, "output_tokens": 96}, rounds=1), started)
-    assert line == "  [dim]21:34 · 用时 8.1 秒 · 1 轮 · 输入 5.7k / 输出 96[/]"
+    assert line == "[dim]21:34 · 用时 8.1 秒 · 1 轮 · 输入 5.7k / 输出 96[/]"
     monkeypatch.setattr(render.time, "time", lambda: started + 125)
     assert "用时 2 分 5 秒" in render.turn_summary(TurnDone({}, rounds=3), started)
 
