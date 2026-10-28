@@ -183,3 +183,16 @@ def test_use_codex_provider_saves_openai_profile(tmp_path: Path, monkeypatch: py
                                                  "auth": "bearer", "api_key": "sk-relay-abcdef123456",
                                                  "model": "gpt-5.1-codex"}  # fmt: skip
     assert "✓ 连接成功" in console.export_text()  # 存好后照样测了连接
+
+
+def test_list_providers_says_env_key_comes_from_env(monkeypatch: pytest.MonkeyPatch,
+                                                    capsys: pytest.CaptureFixture[str]) -> None:  # fmt: skip
+    """智码这类调用方用环境变量给服务商：以前这一行写「密钥：已写在配置文件」，其实密钥不在配置文件里。"""
+    monkeypatch.setenv("HENG_AGENT_BASE_URL", "https://relay.example.com")
+    monkeypatch.setenv("HENG_AGENT_MODEL", "m")
+    monkeypatch.setenv("HENG_AGENT_API_KEY", "sk-test-not-real")
+    assert cli.main(["--list-providers"]) == 0
+    out = capsys.readouterr().out
+    env_line = out[out.index("* env") :]
+    assert "密钥：HENG_AGENT_API_KEY 已设置" in env_line and "已写在配置文件" not in env_line.split("\n* ")[0][:200]
+    assert "sk-test-not-real" not in out

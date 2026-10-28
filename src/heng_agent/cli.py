@@ -28,7 +28,7 @@ from heng_agent.hooks import is_trusted, load_hooks
 from heng_agent.mcp import MCPManager, load_servers
 from heng_agent.mcp import is_trusted as mcp_is_trusted
 from heng_agent.model.client import make_client
-from heng_agent.model.providers import PROJECT_CONFIG, Profile, config_path, load_profiles
+from heng_agent.model.providers import ENV_PROFILE, PROJECT_CONFIG, Profile, config_path, load_profiles
 from heng_agent.permissions import Permissions, Rules
 from heng_agent.session import SessionStore
 from heng_agent.tools.base import Tool, builtin_tools
@@ -158,7 +158,9 @@ def list_providers(settings: Settings) -> int:
     note = f"；项目配置 {project}" if project.is_file() else ""
     print(f"配置文件：{config_path(settings.home)}{note}（默认 {default}）\n")
     for name, p in profiles.items():
-        if p.api_key:
+        if name == ENV_PROFILE:  # 调用方（如智码）用环境变量给的：密钥也在环境变量里，不在配置文件
+            key = f"密钥：HENG_AGENT_API_KEY {'已设置' if p.api_key else '未设置'}"
+        elif p.api_key:
             key = "密钥：已写在配置文件"
         elif p.api_key_env:
             key = f"密钥：{p.api_key_env} {'已设置' if p.resolve_key() else '未设置'}"
