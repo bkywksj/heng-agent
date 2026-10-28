@@ -487,7 +487,8 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin, Tu
         """
         if self._live is not None:
             return  # 正在流式输出文字时不叠加动画（rich 同一时间只能有一个实时区域）
-        message = Ticker(text, hint, self._turn_started if started is None else started, limit)
+        message = Ticker(text, hint, self._turn_started if started is None else started, limit,
+                         tokens=lambda: self.agent.turn_output_tokens)  # fmt: skip
         if self._in_live_turn():  # 回答中输入框一直在：转圈画在输入框上方，不用 rich 的 Status（会和输入框抢光标）
             self._turn_activity = message
             return

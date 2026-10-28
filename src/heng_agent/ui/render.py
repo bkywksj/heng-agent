@@ -235,8 +235,10 @@ class Ticker:
     的「Running… (1m 2s · timeout 10m)」提的）。rich 的等待动画每秒重画十几次，每次都会调 __rich__。
     """
 
-    def __init__(self, text: str, hint: str, started: float, limit: float | None = None) -> None:
-        self.text, self.hint, self.started, self.limit = text, hint, started, limit
+    def __init__(self, text: str, hint: str, started: float, limit: float | None = None,
+                 tokens: Any = None) -> None:  # fmt: skip
+        """tokens：现取这一问已经输出了多少 token（照 Claude Code 的「↓ 31.8k tokens」），0 就不显示。"""
+        self.text, self.hint, self.started, self.limit, self.tokens = text, hint, started, limit, tokens
 
     def __rich__(self) -> Any:
         from rich.text import Text
@@ -244,6 +246,9 @@ class Ticker:
         timing = elapsed_text(time.time() - self.started)
         if self.limit:
             timing += f" · 超时 {elapsed_text(self.limit)}"
+        count = self.tokens() if self.tokens is not None else 0
+        if count:
+            timing += f" · ↓ {human_tokens(count)} tokens"
         hint = f" · {escape(self.hint)}" if self.hint else ""
         return Text.from_markup(f"[cyan]{escape(self.text)}[/] [dim]({timing}){hint}[/]")
 

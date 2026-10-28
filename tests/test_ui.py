@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import time
 from pathlib import Path
 
 import pytest
@@ -264,3 +265,21 @@ def test_slow_tool_result_shows_duration(tmp_path: Path, monkeypatch: pytest.Mon
     repl._unspin()
     text = console.export_text()
     assert "· 3s" in text and text.count("· 3s") == 1
+
+
+def test_spinner_shows_turn_output_tokens(tmp_path: Path) -> None:
+    """转圈那行照 Claude Code 显示这一问输出了多少 token：流式时按收到的字估，请求结束换成服务报的数。"""
+    from heng_agent.agent import estimate_tokens
+    from heng_agent.ui.render import Ticker
+
+    assert estimate_tokens("你好世界") == 4 and estimate_tokens("abcdefgh") == 2
+    seen: list[int] = []
+    agent = Agent(Settings(workdir=tmp_path, home=tmp_path / "h"), FakeModel([["一二三四五六七八九十"]]))
+    agent.run("说话", lambda e: seen.append(agent.turn_output_tokens), lambda t, a: "allow")
+    assert 10 in seen  # 流式输出那段时：按 10 个汉字估
+    assert agent.turn_output_tokens == 5  # 结束后换成服务报的 output_tokens（假模型每次报 5）
+    console = Console(record=True, width=100, force_terminal=False)
+    console.print(Ticker("思考中…", "ESC 中断", time.time() - 3, tokens=lambda: 31_800))
+    assert "思考中… (3s · ↓ 31.8k tokens) · ESC 中断" in console.export_text()
+    console.print(Ticker("思考中…", "", time.time(), tokens=lambda: 0))
+    assert "tokens" not in console.export_text()  # 还没有输出：不显示

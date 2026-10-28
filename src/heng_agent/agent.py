@@ -36,7 +36,7 @@ from heng_agent.core.types import (
 )
 from heng_agent.hooks import Hook, HookRunner
 from heng_agent.model import context_window
-from heng_agent.model.client import ModelClient
+from heng_agent.model.client import ModelClient, make_client
 from heng_agent.model.context_window import window_key
 from heng_agent.permissions import Approver, Permissions
 from heng_agent.session import SessionStore
@@ -56,6 +56,14 @@ MAX_EMPTY_RETRIES = 1  # 模型返回空回复时自动重新请求几次
 SHRINK_TOOL_RESULT = 8000  # 补救时把超过这么多字的工具结果截短到这么长
 SHRINK_MARK = "\n（上下文超限，这段工具结果被截短了）"
 MCP_DEFER_RATIO = 0.1  # MCP 工具声明超过上下文的这个比例就按需加载
+
+
+def estimate_tokens(text: str) -> float:
+    """粗估一段输出有多少 token：汉字等全角字符约 1 个一个，其余约 4 个字符一个（流式输出时用，结束后换成实数）。"""
+    wide = sum(1 for ch in text if ord(ch) > 0x2E7F)
+    return wide + (len(text) - wide) / 4
+
+
 MCP_DEFER_BASE_CAP = 200_000  # 上面的比例最多按这么长的上下文算（见 defer_mcp）
 CHARS_PER_TOKEN = 3  # 粗估：工具声明多是 JSON 与英文，约 3 字符一个 token
 #: 用量记哪几项：缓存读 / 写单独记，计价倍数不同（见 Profile.cost）
@@ -129,6 +137,7 @@ class Agent:
         self.last_input_tokens = 0  # 最近一次请求的输入 token：判断是否快撑满上下文
         #: 最近一次请求的输出速度（token/秒，从第一段输出到结束）；状态栏显示。没测到（太短、没用量）是 None
         self.last_speed: float | None = None
+        self._turn_output_done, self._streamed = 0, 0.0
         #: 接口查到的上下文长度，按（地址, 模型）记；界面在后台查（见 Repl._ensure_window），查不到记 0
         self.fetched_windows: dict[tuple[str, str], int] = {}
         #: 每一问一个检查点：这一问开始时历史有多长、改过的文件原内容（None = 原来不存在）。/undo 用
@@ -191,7 +200,10 @@ class Agent:
             tools = [t for t in builtin_tools() if t.name in names]
             # 带上主智能体的规则：以前另建一个不带规则的权限对象，用户写的 deny read_file(.env) 对子智能体无效
             permissions = Permissions("plan", self.permissions.rules)
-            sub = Agent(settings.model_copy(update={"permission_mode": "plan"}), self.client, tools=tools,
+            # 后台的用自己的模型客户端：客户端里的取消标志、正在读的响应是共用的——主对话按 ESC 会关掉
+            # 后台子智能体正在读的响应；后台发新请求时又会清掉取消标志，把主对话刚按的 ESC 吞掉
+            client = self._own_client() if own_cancel else self.client
+            sub = Agent(settings.model_copy(update={"permission_mode": "plan"}), client, tools=tools,
                         permissions=permissions, subagents=False)  # fmt: skip
             if not own_cancel:  # 后台的有自己的取消标志：主对话按 ESC 不会把它一起停掉
                 self._share_cancel(sub)
@@ -204,6 +216,13 @@ class Agent:
         sub.ctx.snapshot = self._snapshot  # 子智能体改的文件也记进主智能体这一问：/undo 能恢复
         approve = self._approve or (lambda tool, args: "deny")
         return sub, approve
+
+    def _own_client(self) -> ModelClient:
+        """同一个服务商、同一个模型的新客户端（后台子智能体用）；客户端不是按配置档建的（测试的假模型）就共用。"""
+        profile = getattr(self.client, "profile", None)
+        if profile is None:
+            return self.client
+        return make_client(profile, getattr(self.client, "max_tokens", self.settings.max_tokens))
 
     def _add_usage(self, usage: dict[str, int]) -> None:
         with self._usage_lock:
@@ -355,6 +374,12 @@ class Agent:
             text = "".join(b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text")
             titles.append(text.strip().splitlines()[0] if text.strip() else "（空）")
         return titles
+
+    @property
+    def turn_output_tokens(self) -> int:
+        """这一问到现在模型输出了多少 token（含思考、工具参数）：结束了的请求用服务报的数，正在流式输出的
+        那次按收到的字估（照 Claude Code 转圈那行的「↓ 31.8k tokens」）。界面线程读，智能体线程写，只读两个数。"""
+        return self._turn_output_done + round(self._streamed)
 
     @property
     def context_window(self) -> int:
@@ -525,6 +550,7 @@ class Agent:
         content: list[dict[str, Any]] = [{"type": "text", "text": user_text}, *(images or [])]
         self.messages.append({"role": "user", "content": content})
         turn_usage = dict.fromkeys(USAGE_KEYS, 0)
+        self._turn_output_done, self._streamed = 0, 0.0  # 转圈那行的「↓ 多少 tokens」（见 turn_output_tokens）
         rounds = 0
         overflow_tries = 0  # 这一问里「上下文超长」补救了几次
         empty_retries = 0  # 这一问里因为空回复重新请求了几次
@@ -547,6 +573,10 @@ class Agent:
                 for event in self.client.stream(self.system_prompt(), self.messages, specs):
                     if first_output is None and not isinstance(event, TurnEnd):
                         first_output = time.monotonic()
+                    if isinstance(event, (TextDelta, ThinkingDelta)):
+                        self._streamed += estimate_tokens(event.text)
+                    elif isinstance(event, ToolCall):
+                        self._streamed += estimate_tokens(json.dumps(event.input, ensure_ascii=False))
                     if isinstance(event, TextDelta):
                         text.append(event.text)
                         on_event(event)
@@ -577,6 +607,9 @@ class Agent:
             finally:
                 self._phase = None
             output = end.usage.get("output_tokens", 0)
+            # 这次请求结束：估的换成服务报的实数（没报就留着估的）
+            self._turn_output_done += output or round(self._streamed)
+            self._streamed = 0.0
             finished = time.monotonic()
             spent = finished - first_output if first_output is not None else 0.0
             if spent < 0.2:
