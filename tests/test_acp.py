@@ -204,3 +204,25 @@ def test_config_options_model_mode_thinking(tmp_path: Path) -> None:
     assert after == {"model": "heng", "mode": "ask", "thinking": "on"}
     updates = [e[1] for e in client.events if e[0] == "update" and e[1].session_update == "config_option_update"]
     assert updates and {o.id: o.current_value for o in updates[-1].config_options}["mode"] == "plan"
+
+
+def test_permission_request_shows_diff(tmp_path: Path) -> None:
+    work = tmp_path / "w"
+    work.mkdir()
+    (work / "cart.py").write_text("FREE_SHIPPING = 99\n", encoding="utf-8")
+    edit = {"path": "cart.py", "old_string": "FREE_SHIPPING = 99", "new_string": "FREE_SHIPPING = 88"}
+    client = RecordingClient("once")
+
+    async def scenario() -> None:
+        env = _env(tmp_path, [[["tool", "edit_file", edit]], ["改好了"]])
+        async with acp.spawn_agent_process(client, sys.executable, AGENT, env=env) as (conn, _):
+            await conn.initialize(protocol_version=acp.PROTOCOL_VERSION)
+            session = await conn.new_session(cwd=str(work), mcp_servers=[])
+            await conn.prompt(session_id=session.session_id, prompt=[acp.text_block("把包邮门槛改成 88")])
+
+    _run(scenario())
+    request = next(e[1] for e in client.events if e[0] == "permission")
+    assert request.kind == "edit"  # 确认框能显示成「编辑」
+    diff = request.content[0]  # 客户端弹确认框时多半只看这条请求：要带上改动对比
+    assert diff.type == "diff" and diff.old_text == "FREE_SHIPPING = 99" and diff.new_text == "FREE_SHIPPING = 88"
+    assert (work / "cart.py").read_text(encoding="utf-8") == "FREE_SHIPPING = 88\n"  # 允许后真的改了

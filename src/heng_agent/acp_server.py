@@ -317,8 +317,11 @@ class HengAgent(acp.Agent):
         def approve(tool: Any, args: dict[str, Any]) -> str:
             """权限确认：排进同一个队列（保证在「开始调用」之后到达），等客户端回复。"""
             answer: concurrent.futures.Future[str] = concurrent.futures.Future()
+            # 带上工具类型与改动对比：客户端弹确认框时多半只看这条请求，不带就看不到要改什么
             request = schema.ToolCallUpdate(tool_call_id=current_call.get("id", "tool"),
-                                            title=tool_title(agent, tool.name, args), raw_input=args)  # fmt: skip
+                                            title=tool_title(agent, tool.name, args), raw_input=args,
+                                            kind=TOOL_KIND.get(tool.name, ("other", ""))[0],  # type: ignore[arg-type]
+                                            content=tool_preview(tool.name, args))  # fmt: skip
             send(("permission", request, answer))
             try:
                 return answer.result()
