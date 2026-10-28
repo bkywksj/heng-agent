@@ -83,7 +83,7 @@ description: |
 
 | 现象 | 原因与处理 |
 |---|---|
-| `heng-agent` 报 `ModuleNotFoundError: heng_agent` | 工具环境坏了（重装被打断等）。按第 7 步从标签重装 |
+| `heng-agent` 报 `ModuleNotFoundError: heng_agent` | 工具环境坏了：**多半是 Windows 上有 heng-agent 开着时重装 / 升级**——它加载的文件被占用，uv 装到一半失败（os error 32），把环境删了一半。关掉所有 heng-agent 窗口，按第 7 步重装 |
 | 正式版启动提示「配置里有不认识的设置」 | 开发版或新版写了新字段；只是提示，不影响使用。要清掉就删 `~/.heng-agent/config.json` 里那一项 |
 | `heng-agent --version` 带 `-dev` | 装成了可编辑安装或从工作目录装的；按第 7 步重装 |
 | 两个窗口分不清哪个是开发版 | 开发版欢迎页是品红边框带「开发版」徽标，状态栏也有徽标 |
