@@ -121,3 +121,14 @@ def test_banner_shows_new_version(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(repl_module, "is_dev", lambda: True)
     assert "有新版本" not in banner()  # 开发版不提示
     assert __version__  # 当前版本号存在（提示里用）
+
+
+def test_latest_from_simple_index() -> None:
+    # 有 versions 字段（PEP 700）：只算正式版，按数字比
+    assert updates.latest_from_index({"versions": ["0.2.0", "0.10.0", "0.9.0", "0.11.0rc1", "0.11.0.dev2"]}) == "0.10.0"
+    # 没有 versions 字段：从文件名里取
+    files = [{"filename": "heng_agent-0.3.0-py3-none-any.whl"}, {"filename": "heng_agent-0.3.0.tar.gz"},
+             {"filename": "heng_agent-0.2.0-py3-none-any.whl"}]  # fmt: skip
+    assert updates.latest_from_index({"files": files}) == "0.3.0"
+    assert updates.latest_from_index({}) is None
+    assert all("/simple/" in url for url in updates.VERSION_URLS)  # 不用清华镜像那个过时的 /pypi/<包>/json

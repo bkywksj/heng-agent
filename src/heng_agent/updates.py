@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -29,11 +30,15 @@ from heng_agent import __version__
 
 PACKAGE = "heng-agent"
 MIRROR = "https://pypi.tuna.tsinghua.edu.cn/simple"
-#: 查最新版本：先 PyPI，连不上换清华镜像（都提供 JSON 接口）
+#: 查最新版本：先 PyPI，连不上换清华镜像。都用「简单索引」的 JSON 格式（PEP 691），不用 /pypi/<包>/json：
+#: 清华镜像的 /pypi/<包>/json 是旧数据（实测 pip 官方 26.2.2、它给 24.2），用它的话国内用户永远收不到新版本提示；
+#: 简单索引是安装时真正用的，镜像会及时同步
 VERSION_URLS = (
-    f"https://pypi.org/pypi/{PACKAGE}/json",
-    f"https://pypi.tuna.tsinghua.edu.cn/pypi/{PACKAGE}/json",
+    f"https://pypi.org/simple/{PACKAGE}/",
+    f"https://pypi.tuna.tsinghua.edu.cn/simple/{PACKAGE}/",
 )
+_RELEASE = re.compile(r"^\d+(\.\d+)*$")  # 只算正式版：1.2.3；不算 1.2.3rc1、1.2.3.dev4
+_FILE_VERSION = re.compile(r"^heng[_-]agent-(\d+(?:\.\d+)*)(?:-|\.tar)", re.IGNORECASE)
 CACHE_FILE = "update-check.json"
 CHECK_INTERVAL = 24 * 3600  # 每天最多查一次
 
@@ -59,12 +64,26 @@ def is_newer(latest: str, current: str = __version__) -> bool:
     return parse_version(latest) > parse_version(current)
 
 
+def latest_from_index(data: dict[str, object]) -> str | None:
+    """从简单索引的 JSON 里取最新的正式版：有 versions 字段（PEP 700）就用它，没有就从文件名里取。"""
+    versions = data.get("versions")
+    if not isinstance(versions, list):
+        files = data.get("files") if isinstance(data.get("files"), list) else []
+        versions = [m.group(1) for f in files if isinstance(f, dict)  # type: ignore[union-attr]
+                    for m in [_FILE_VERSION.match(str(f.get("filename", "")))] if m]  # fmt: skip
+    releases = [str(v) for v in versions if _RELEASE.match(str(v))]
+    return max(releases, key=parse_version) if releases else None
+
+
 def fetch_latest(timeout: float = 5.0) -> str | None:
     """问 PyPI 最新的正式版本号；都连不上返回 None。"""
     for url in VERSION_URLS:
+        request = urllib.request.Request(url, headers={"Accept": "application/vnd.pypi.simple.v1+json"})
         try:
-            with urllib.request.urlopen(url, timeout=timeout) as response:  # 固定的 https 地址
-                return str(json.load(response)["info"]["version"])
+            with urllib.request.urlopen(request, timeout=timeout) as response:  # 固定的 https 地址
+                latest = latest_from_index(json.load(response))
+            if latest:
+                return latest
         except Exception:  # 网络、解析出什么错都只是查不到，不影响使用
             continue
     return None
