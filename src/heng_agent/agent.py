@@ -165,8 +165,10 @@ class Agent:
         if role is None or role.read_only:
             names = role.tools if role else ("read_file", "glob", "grep")
             tools = [t for t in builtin_tools() if t.name in names]
+            # 带上主智能体的规则：以前另建一个不带规则的权限对象，用户写的 deny read_file(.env) 对子智能体无效
+            permissions = Permissions("plan", self.permissions.rules)
             sub = Agent(settings.model_copy(update={"permission_mode": "plan"}), self.client, tools=tools,
-                        subagents=False)  # fmt: skip
+                        permissions=permissions, subagents=False)  # fmt: skip
             self._share_cancel(sub)
             return sub, lambda tool, args: "deny"
         tools = [t for t in builtin_tools() if t.name in role.tools]

@@ -181,3 +181,22 @@ def test_agents_detail_by_name_and_by_picking(tmp_path: Path, monkeypatch: pytes
     assert "审查改动。只读。" in console.export_text()
     repl.handle_command("/agents 不存在")
     assert "没有叫 不存在 的角色" in console.export_text()
+
+
+@pytest.mark.parametrize("role", ["调研员", None])  # 只读角色、不指定角色的通用调研员
+def test_read_only_subagent_obeys_deny_rules(tmp_path: Path, role: str | None) -> None:
+    """以前只读子智能体另建了一个不带规则的权限对象：用户写的 deny read_file(secret.txt) 对它无效，派出去就能读。"""
+    from heng_agent.permissions import Permissions, Rules
+
+    task = {"description": "看", "prompt": "secret.txt 里是什么", **({"agent": role} if role else {})}
+    agent, model = _agent(tmp_path, [
+        [("tool", "task", task)],
+        [("tool", "read_file", {"path": "secret.txt"})],  # 子智能体去读被拒绝的文件
+        ["读不到"],
+        ["好"],
+    ])  # fmt: skip
+    (agent.settings.workdir / "secret.txt").write_text("TOPSECRET\n", encoding="utf-8")
+    agent.permissions = Permissions("ask", Rules(deny=["read_file(secret.txt)"]))
+    agent.run("派人看看 secret.txt", lambda e: None, lambda t, a: "deny")
+    sub_result = model.calls[2][-1]["content"][0]["content"]  # 子智能体第二次请求时带回的工具结果
+    assert "TOPSECRET" not in sub_result
