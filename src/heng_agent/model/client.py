@@ -280,6 +280,10 @@ class _HttpClient:
             raise ModelError(f"连不上模型服务 {self.profile.base_url}：{hint}", retryable=remote) from exc
         except (httpx.ReadTimeout, httpx.RemoteProtocolError, httpx.ReadError) as exc:
             raise ModelError(f"和模型服务的连接中断：{type(exc).__name__}", retryable=True) from exc
+        except (httpx.TimeoutException, httpx.WriteError) as exc:
+            # 连接超时（TLS 握手超时）、写超时、等连接池超时：以前没接住，原样抛出去——不重试、报错也是英文的
+            # （后台子智能体实测撞到：ConnectTimeout: _ssl.c:1015: The handshake operation timed out）
+            raise ModelError(f"连模型服务超时：{type(exc).__name__}", retryable=True) from exc
         finally:
             self._active = None
 

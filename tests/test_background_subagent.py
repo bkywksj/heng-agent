@@ -204,3 +204,16 @@ def test_down_selects_agent_and_enter_views(tmp_path: Path) -> None:
         pipe.send_text("\r")  # 退出面板后 Enter 照常发送
         assert box.prompt() == "草稿"
     assert viewed == [9]
+
+
+def test_background_subagent_gets_its_own_client(tmp_path: Path) -> None:
+    """后台的用自己的模型客户端：共用的话主对话按 ESC 会关掉它正在读的响应，它发新请求时又会清掉主对话的取消标志。"""
+    from heng_agent.model.client import make_client
+    from heng_agent.model.providers import Profile
+
+    profile = Profile(protocol="anthropic", base_url="https://relay.example", model="claude-sonnet-4-6", api_key="k")
+    agent = _agent(tmp_path, make_client(profile, 100))
+    background, _ = agent._spawn_subagent(None, own_cancel=True)
+    foreground, _ = agent._spawn_subagent(None)
+    assert background.client is not agent.client and background.client.profile == profile
+    assert foreground.client is agent.client  # 前台的照旧共用（ESC 本来就该一起停）

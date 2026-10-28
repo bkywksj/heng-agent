@@ -215,3 +215,20 @@ def test_no_retry_once_text_has_been_streamed() -> None:
         for e in client.stream("", [], []):
             got.append(e)
     assert got == [TextDelta("我来读"), TextDelta("一下。")] and len(calls) == 1 and slept == []
+
+
+@pytest.mark.parametrize("error", [httpx.ConnectTimeout, httpx.PoolTimeout, httpx.WriteTimeout])
+def test_connect_timeout_is_retried(error: type[Exception]) -> None:
+    """连接超时（TLS 握手超时）以前没接住：原样抛出去，不重试（后台子智能体实测撞到 ConnectTimeout）。"""
+    calls: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(1)
+        if len(calls) == 1:
+            raise error("The handshake operation timed out", request=request)
+        return httpx.Response(200, text="\n".join(TOOL_STREAM))
+
+    client, slept, notes = _client_with(httpx.MockTransport(handler))
+    events = list(client.stream("", [], []))
+    assert isinstance(events[-1], TurnEnd) and len(calls) == 2 and slept == [1.0]
+    assert "连模型服务超时" in notes[0]
