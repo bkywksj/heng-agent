@@ -40,7 +40,7 @@ def test_toolbar_content() -> None:
     info, mode = bar.split("\n")  # 两行：信息 + 权限模式
     assert "▣ proj" in info and "E:\\" not in info  # 只放项目名，完整路径在欢迎页
     assert "yongye · claude-sonnet-5" in info and "上下文 ░░░░░░░░ 1% 1.7k/200k" in info
-    assert mode.startswith(" ▸ ask 每次问") and "Shift+Tab 切换" in mode
+    assert mode.startswith(" ⏵ ask 每次问") and "Shift+Tab 切换" in mode
     hot = toolbar("auto", "m", "w", 170_000, 200_000)
     styles = [part[0] for part in hot]
     assert "class:bar.mode-auto" in styles and "class:bar.ctx-hot" in styles  # auto 与上下文快满都醒目标出

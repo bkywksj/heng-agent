@@ -155,9 +155,10 @@ def human_tokens(n: int) -> str:
     return text + unit
 
 
-#: 第二行权限模式前的图标：箭头越多放得越开，plan 是暂停号（先出计划、不动手）。
-#: 都用单宽字符：emoji 在有的终端里宽度不一，对不齐
-MODE_ICON = {"ask": "▸", "accept-edits": "▸▸", "plan": "‖", "auto": "▸▸▸"}
+#: 第二行权限模式前的图标，和 Claude Code 一样用 ⏵：箭头越多放得越开；plan 用暂停号 ‖（先出计划、不动手）。
+#: 都是单宽字符；别换成 ⏩ 这类 emoji，有的终端算两格、有的算一格，对不齐。
+#: plan 没用 Claude Code 的 ⏸：Windows Terminal 把它画成蓝色 emoji 方块、压住后面的字，加 U+FE0E 也一样（实测）
+MODE_ICON = {"ask": "⏵", "accept-edits": "⏵⏵", "plan": "‖", "auto": "⏵⏵⏵"}
 MODE_STYLE = {"ask": "class:bar.mode", "accept-edits": "class:bar.mode-edits", "plan": "class:bar.mode-plan",
               "auto": "class:bar.mode-auto"}  # fmt: skip
 CTX_CELLS = 8  # 上下文进度条的格数
@@ -235,7 +236,7 @@ def info_line(model: str, workdir: str, used: int, window: int, *, thinking: boo
 
 def mode_line(mode: str, *, background: int, pct: float, threshold: float, window: int,
               width: int | None) -> list[tuple[str, str]]:  # fmt: skip
-    icon = MODE_ICON.get(mode, "▸")
+    icon = MODE_ICON.get(mode, "⏵")
     parts: list[tuple[str, str]] = [(MODE_STYLE.get(mode, "class:bar.mode"), f" {icon} {MODE_LABEL.get(mode, mode)}")]
     hint = ("class:bar.dim", "  (Shift+Tab 切换)")
     extras: list[tuple[str, str]] = []

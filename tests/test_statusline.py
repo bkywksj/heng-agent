@@ -29,7 +29,7 @@ def test_wide_window_shows_everything() -> None:
                                 width=200, **FULL))  # fmt: skip
     for piece in ("▣ heng-agent", "master*", "yongye · claude-sonnet-5", "✓ MCP 6", "52t/s", "██", "23% 46k/200k"):
         assert piece in info
-    assert mode.startswith(" ▸▸ accept-edits 改文件不问")
+    assert mode.startswith(" ⏵⏵ accept-edits 改文件不问")
 
 
 @pytest.mark.parametrize("width", [100, 80, 60, 50, 40])
@@ -49,14 +49,19 @@ def test_mode_line_per_mode_and_reminders() -> None:
     icons = {
         mode: _lines(toolbar(mode, "m", "w", 0, 1))[1].split()[0] for mode in ("ask", "accept-edits", "plan", "auto")
     }
-    assert icons == {"ask": "▸", "accept-edits": "▸▸", "plan": "‖", "auto": "▸▸▸"}
+    assert icons == {
+        "ask": "⏵",
+        "accept-edits": "⏵⏵",
+        "plan": "‖",
+        "auto": "⏵⏵⏵",
+    }  # ⏵ 同 Claude Code；⏸ 在 Windows Terminal 里是 emoji 方块
     mode = _lines(toolbar("ask", "m", "w", 70_000, 100_000, background=2))[1]
     assert "后台任务 2" in mode and "距自动压缩 10%" in mode  # 提醒放第二行，不挤第一行
 
 
 def test_icons_are_single_width() -> None:
     """emoji 在有的终端里算两格、有的算一格，对不齐；状态栏只用单宽字符。"""
-    for ch in "▣│▸‖█░✓✻":
+    for ch in "▣│⏵‖█░✓✗✻":
         assert cell_len(ch) == 1, ch
 
 
