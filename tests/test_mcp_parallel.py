@@ -182,7 +182,8 @@ def test_toolbar_shows_live_mcp_status_and_wakes_input(tmp_path: Path, gate: thr
     repl, _ = _repl(tmp_path, manager)
     woke = threading.Event()
     manager.on_done(woke.set)
-    assert mcp_view.toolbar_part(repl) == ("class:bar.mcp-wait", "  MCP 连接中 0/3")
+    style, text = mcp_view.toolbar_part(repl) or ("", "")
+    assert style == "class:bar.mcp-wait" and text.endswith("MCP 连接中 0/3") and text.strip()[0] in mcp_view.SPINNER
     gate.set()
     assert woke.wait(5)  # 连完（不论成败）回调一次，不用等用户提交输入
     assert mcp_view.toolbar_part(repl) == ("class:bar.mcp-fail", "  MCP 2/3 · 1 个连不上")  # 还没 _sync_mcp 也是实时的
@@ -209,3 +210,33 @@ def test_input_box_refresh_is_noop_when_closed(tmp_path: Path) -> None:
     box = InputBox.__new__(InputBox)
     box.app = None
     box.refresh()  # 输入框没开着（模型正在回答）时连完：什么都不做，不报错
+
+
+def test_toolbar_progress_counts_each_server_as_it_finishes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """以前结果要全部连完才登记，状态栏从 0/3 直接跳到全部（用户反馈「没有数量变化」）；现在每连完一个就加一。"""
+    from heng_agent.ui import mcp_view
+
+    gates = {name: threading.Event() for name in ("first", "second", "third")}
+
+    def fake_open(self: MCPManager, config: ServerConfig) -> Any:
+        gates[config.name].wait(10)
+        return FakeClient(config), [{"name": "t"}]
+
+    monkeypatch.setattr(MCPManager, "_open", fake_open)
+    manager = MCPManager(_configs(), tmp_path, background=True)
+    repl, _ = _repl(tmp_path, manager)
+
+    def shown() -> str:
+        return (mcp_view.toolbar_part(repl) or ("", ""))[1]
+
+    assert shown().endswith("连接中 0/3")
+    gates["second"].set()
+    deadline = time.monotonic() + 5
+    while manager.opened < 1 and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert shown().endswith("连接中 1/3")
+    gates["first"].set()
+    gates["third"].set()
+    assert manager.wait(5)
+    assert shown() == "  ✓ MCP 3"
+    manager.close()

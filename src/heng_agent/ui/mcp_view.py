@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import re
+import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -127,6 +128,9 @@ def counts(repl: Repl) -> tuple[int, int, int]:
     return len(ok), tools, failed
 
 
+SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+
+
 def toolbar_part(repl: Repl) -> tuple[str, str] | None:
     """状态栏里的 MCP 一段：(样式, 文字)；没配 MCP 返回 None。
 
@@ -144,10 +148,13 @@ def toolbar_part(repl: Repl) -> tuple[str, str] | None:
     waiting = sum(1 for _, good, detail in entries if not good and detail == CONNECTING)
     ok = sum(1 for _, good, _ in entries if good)
     if waiting:
-        return "class:bar.mcp-wait", f"  MCP 连接中 {ok}/{len(entries)}"
+        # 还在连的管理器：结果没登记，用「已连完几个」显示进度（每连完一个加一，不是 0 直接跳到全部）
+        done = sum(min(m.opened, len(m.configs)) for m in repl.mcp_managers if not m.ready)
+        frame = SPINNER[int(time.monotonic() * 10) % len(SPINNER)]  # 连接中由 Repl.watch_mcp 定时重画，转起来
+        return "class:bar.mcp-wait", f"  {frame} MCP 连接中 {ok + done}/{len(entries)}"
     if ok < len(entries):
         return "class:bar.mcp-fail", f"  MCP {ok}/{len(entries)} · {len(entries) - ok} 个连不上"
-    return "class:bar.mcp", f"  MCP {ok}"
+    return "class:bar.mcp", f"  ✓ MCP {ok}"
 
 
 def connecting(repl: Repl) -> list[str]:

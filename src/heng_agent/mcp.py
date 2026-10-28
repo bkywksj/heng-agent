@@ -398,6 +398,8 @@ class MCPManager:
         self._done = threading.Event()
         self._done_lock = threading.Lock()  # 登记回调与「连完了」之间不漏掉：见 on_done
         self._callbacks: list[Callable[[], None]] = []
+        #: 已经连完（不论成败）的服务数：结果要全部连完才按顺序登记，状态栏靠它显示「连上了几个」
+        self.opened = 0
         self._thread: threading.Thread | None = None
         #: 是否后台连接：是的话工具要由界面在连完后接进智能体（构造时还没有）
         self.background = background and bool(servers)
@@ -413,7 +415,7 @@ class MCPManager:
         # 线程里只建连接、握手；登记工具与状态在全部连完后按配置顺序做，工具与欢迎页的顺序不随谁先连上而变
         try:
             with ThreadPoolExecutor(max_workers=max(1, len(servers)), thread_name_prefix="mcp-open") as pool:
-                opened = list(pool.map(self._open, servers))
+                opened = list(pool.map(self._open_counted, servers))
             for config, result in zip(servers, opened, strict=True):
                 self._register(config, result)
         finally:
@@ -455,6 +457,13 @@ class MCPManager:
                 self.status[i] = entry
                 return
         self.status.append(entry)
+
+    def _open_counted(self, config: ServerConfig) -> tuple[_Session, list[dict[str, Any]]] | AgentError:
+        try:
+            return self._open(config)
+        finally:
+            with self._done_lock:
+                self.opened += 1
 
     def _open(self, config: ServerConfig) -> tuple[_Session, list[dict[str, Any]]] | AgentError:
         """建连接并握手，返回 (连接, 工具定义) 或失败原因。不碰共享状态，可以在线程里并行跑。"""

@@ -236,6 +236,18 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin):
         if self._box is not None:
             self._box.refresh()
 
+    def watch_mcp(self, manager: MCPManager) -> None:
+        """后台连接的 MCP 管理器：连接中每 0.1 秒重画一次输入框（状态栏的转圈与进度动起来），连完再重画一次。"""
+        manager.on_done(self._refresh_input)
+        if manager.ready:
+            return
+
+        def tick() -> None:
+            while not manager.wait(0.1):
+                self._refresh_input()
+
+        threading.Thread(target=tick, name="mcp-progress", daemon=True).start()
+
     def _set_mode(self, mode: str) -> None:
         self.agent.permissions.mode = mode  # type: ignore[assignment]
 
