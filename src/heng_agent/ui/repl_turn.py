@@ -138,6 +138,7 @@ class TurnMixin:
                 if name in INSTANT_COMMANDS:  # 只看状态、改下次请求的设置：马上执行，不排队
                     self.echo_user(result, restart_timer=False)  # type: ignore[attr-defined]
                     self.handle_command(result.strip())  # type: ignore[attr-defined]
+                    self._block_start = False  # type: ignore[attr-defined]  # 命令打印了东西：下一块前要空一行
                     continue
                 with self._queue_lock:
                     self._queued.append(result)  # type: ignore[attr-defined]
@@ -217,8 +218,10 @@ class TurnMixin:
         out = io.StringIO()
         Console(file=out, force_terminal=True, color_system=real.color_system or "standard", width=real.width,
                 legacy_windows=False, highlight=False).print(Group(*parts))  # fmt: skip
-        lines = out.getvalue().rstrip("\n").split("\n")
-        return ANSI("\n".join(lines[-LIVE_MAX_LINES:]))
+        lines = out.getvalue().rstrip("\n").split("\n")[-LIVE_MAX_LINES:]
+        if not getattr(self, "_block_start", True):  # 和上方已经打印的内容隔开一行，同 Repl._gap（不然贴着工具结果）
+            lines.insert(0, "")
+        return ANSI("\n".join(lines))
 
 
 class _Spinner:

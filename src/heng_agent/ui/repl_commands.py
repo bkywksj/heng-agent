@@ -243,9 +243,15 @@ class CommandsMixin:
     def _btw_show(self, renderable: Any) -> None:
         """把旁支问题的回答显示出来（后台线程里调）：回答中经输入框打印到上方；平时输入框开着就收起来打印。"""
         box = self._box
-        if box is not None and box.turn is None and box.print_above(lambda: self.console.print(renderable)):
+
+        def show() -> None:
+            self.console.print()  # 和上面的内容隔开一行
+            self.console.print(renderable)
+            self._block_start = False
+
+        if box is not None and box.turn is None and box.print_above(show):
             return
-        self.console.print(renderable)  # 回答中 console 是写到输入框上方的那个；没有输入框就直接打印
+        show()  # 回答中 console 是写到输入框上方的那个；没有输入框就直接打印
 
     def tasks_command(self, rest: str) -> None:
         """/tasks：列出后台任务；/tasks kill 任务号：停掉。"""

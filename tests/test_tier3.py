@@ -189,7 +189,7 @@ def test_tool_lines_are_compact(tmp_path: Path) -> None:
     assert all(len(line) <= 60 for line in tool_lines)  # 每条只占一行：超长截断，不折行
     assert any(line.startswith("● 运行 echo") and line.endswith("…") for line in lines)
     start = lines.index(next(line for line in lines if line.startswith("● 读取")))
-    assert lines[start - 1].strip() != ""  # 连续工具之间不空行
+    assert lines[start - 1].strip() == "" and lines[start - 2].strip() != ""  # 每次工具调用之间空一行（只空一行）
 
 
 def test_banner_suggests_init_only_without_heng_md(tmp_path: Path) -> None:
@@ -203,3 +203,26 @@ def test_banner_suggests_init_only_without_heng_md(tmp_path: Path) -> None:
     assert "/init" in banner_text(work)  # 项目还没有说明：提醒一句
     (work / "HENG.md").write_text("# 说明\n", encoding="utf-8")
     assert "/init" not in banner_text(work)  # 有了就不再提
+
+
+def test_blocks_are_separated_by_exactly_one_blank_line(tmp_path: Path) -> None:
+    """提问、思考摘要、回复、每次工具调用、插话、过程提示、结尾那行：块与块之间空一行，不挤也不空两行。"""
+    from heng_agent.core import types as t
+
+    console = Console(record=True, width=80, force_terminal=False)
+    repl = Repl(Agent(Settings(workdir=tmp_path, home=tmp_path / "h"), FakeModel([])), console=console)
+    repl.echo_user("看看项目")
+    events = [t.ThinkingDelta("想"), t.TextDelta("先看目录。"), t.ToolStarted("t1", "glob", {"pattern": "*"}),
+              t.ToolFinished("t1", "glob", t.ToolResult("a.py")),
+              t.ToolStarted("t2", "bash", {"command": "echo ok"}), t.ToolFinished("t2", "bash", t.ToolResult("ok")),
+              t.UserInterjection("顺便看 README"), t.Notice("正在压缩"), t.TextDelta("看完了。"),
+              t.TurnDone({"input_tokens": 1, "output_tokens": 1}, rounds=2)]  # fmt: skip
+    for event in events:
+        repl.on_event(event)
+    repl._unspin()
+    lines = [line.strip() for line in console.export_text().splitlines()]
+    starts = ("▌", "✻", "先看目录", "● 找文件", "● 运行", "⋯", "看完了")
+    for i, line in enumerate(lines):
+        if i and line.startswith(starts) and not lines[i - 1].startswith("▌"):
+            assert lines[i - 1] == "", f"「{line}」前面没空行"
+    assert all(lines[i] or lines[i + 1] for i in range(len(lines) - 1)), "出现了连续两行空行"

@@ -204,7 +204,8 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin, Tu
         self._thought = ""  # 正在进行的这段思考
         self._think_started = 0.0
         self.last_thought = ""  # 最近一次完整的思考（/think show）
-        self._after_text = False  # 刚结束一段 AI 回复（下一个工具行要先换行）
+        #: 上一行是不是已经空着（块与块之间空一行，不空两行，见 _gap）
+        self._block_start = True
         self._buf = ""
         self._pending_shell: list[str] = []  # 用户 !命令 的输出，附在下一问里
         self._hook_retry()
@@ -213,6 +214,17 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin, Tu
         """模型客户端重试时在界面上说一声（切换服务商后要重新挂）。"""
         if hasattr(self.agent.client, "on_retry"):
             self.agent.client.on_retry = lambda msg: self.on_event(Notice(msg))  # type: ignore[attr-defined]
+
+    def _gap(self) -> None:
+        """开始一个新的块（提问、思考摘要、一段回复、一次工具调用、过程提示、结尾那行……）之前调：
+        块与块之间空一行，上一行已经空着就不再空。
+
+        以前各处各自决定空不空：思考摘要、工具结果、过程提示后面紧跟着回复，连续的工具挤在一起，
+        排队的话贴着上一问的结尾……用户反馈「显得很挤」。统一成这一条规矩。调完紧接着打印内容。
+        """
+        if not self._block_start:
+            self.console.print()
+        self._block_start = False
 
     def _commit(self, text: str) -> None:
         """把写完的一段正式打印到屏幕上（先擦掉实时区域）。同一条回复只有第一段带 ●，后面的段落之间空一行。"""
@@ -224,8 +236,11 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin, Tu
             return
         if self._reply_started:
             self.console.print()
+        else:
+            self._gap()
         self.console.print(self._reply(text, first=not self._reply_started))
         self._reply_started = True
+        self._block_start = False
 
     def _end_text(self) -> None:
         """结束这条回复：剩下没固定的那段也正式打印。"""
@@ -234,7 +249,6 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin, Tu
             self._buf = ""
         if self._reply_started:
             self._reply_started = False
-            self._after_text = True  # 接下来若是工具调用，先换行：否则会接在回复最后一行后面
 
     @staticmethod
     def _reply(text: str, first: bool = True) -> Table:
@@ -517,10 +531,10 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin, Tu
         self._end_text()
         self._unspin()
         if isinstance(event, UserInterjection):  # 回答中插的话已经交给模型：照提问的样子显示在它该在的位置
-            c.print()  # 和上面的工具结果隔开一行，不然竖条紧贴着命令输出（实测）
-            self.echo_user(event.text, restart_timer=False)
+            self.echo_user(event.text, restart_timer=False)  # echo_user 自己会先空一行
             self._spin("思考中…")
         elif isinstance(event, Notice):
+            self._gap()
             c.print(f"[yellow]⋯ {escape(event.text)}[/]")
             self._spin("处理中…")
         elif isinstance(event, ToolStarted):
@@ -528,10 +542,8 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin, Tu
             summary = tool.summary(event.input) if tool else str(event.input)
             label = tool_label(event.name)
             # 工具调用过程做成「注释」的样子：不加粗、偏暗、只占一行（超长截断），不抢回复的视线。
-            # 连续几个工具之间不空行；只有紧跟在 AI 的文字后面时先换行（回复结束时光标留在最后一行末尾）
-            if self._after_text:
-                c.print()
-                self._after_text = False
+            # 每次调用（连同下面的结果）算一块，和前后空一行：以前连续几个工具挤在一起（用户反馈太挤）
+            self._gap()
             line = Text.assemble(("● ", "grey50"), (label, "dark_cyan"), (f" {summary}" if summary else "", "grey50"))
             line.truncate(max(20, c.width - 2), overflow="ellipsis")
             c.print(line, no_wrap=True)
@@ -551,8 +563,8 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin, Tu
                     c.print(row, no_wrap=True)
             self._spin("思考中…")  # 工具结果要交回给模型，接下来又是等模型
         elif isinstance(event, TurnDone):
-            self._after_text = False  # 这一问结束了：下一问的第一个工具前不必再换行
-            c.print("\n" + turn_summary(event, self._turn_started))
+            self._gap()
+            c.print(turn_summary(event, self._turn_started))
 
     # ---------- 确认 ----------
 
@@ -865,6 +877,7 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin, Tu
 
     def read(self) -> str:
         self.console.print()
+        self._block_start = True
         if self._plain_input:  # 退回普通输入的终端：没有边框与底部状态栏，用分隔线 + 一行状态代替
             a = self.agent
             pct = a.last_input_tokens / a.context_window * 100 if a.context_window else 0
@@ -881,10 +894,12 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin, Tu
         里面指向真实文件的 @引用 与绝对路径渲染成超链接（见 linkify）。"""
         lines = text.splitlines() or [""]
         workdir = self.agent.settings.workdir
+        self._gap()  # 排队的话自动发出时前面没有 read() 那行空行，不空的话贴着上一问的结尾（实测）
         for line in lines:  # 每行一根竖条：多行的提问也一眼看得出是一整段
             # 文字也上色（和竖条同色）：长对话里一眼扫得到哪些是自己问的（用户对照 Kimi 的样子提的）
             self.console.print(f"[bold cyan]{PROMPT_BAR}[/] [bold cyan]{linkify(line, workdir)}[/]")
         self.console.print()  # 和下面的「思考中」、回复拉开一点，不挤
+        self._block_start = True
         if restart_timer:  # 回答中插的话、马上执行的命令不重新计时：用时算的还是这一问
             self._turn_started = time.time()  # 这一问从这里开始算用时（每问结尾的那行灰字）
 
@@ -944,6 +959,7 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin, Tu
         self._unspin()
         seconds = time.monotonic() - self._think_started
         self.last_thought = self._thought
+        self._gap()
         self.console.print(f"[grey50]✻ 思考了 {seconds:.1f} 秒（约 {len(self._thought)} 字）· /think show 查看[/]")
         self._thought = ""
 
@@ -1050,12 +1066,14 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin, Tu
                 self._end_text()
                 self._unspin()
                 how = "按了 ESC" if self._esc_pressed else "按了 Ctrl+C"
-                self.console.print(f"\n[yellow]已中断（{how}；正在跑的命令连同子进程已终止）。可以接着说下一步。[/]")
+                self._gap()
+                self.console.print(f"[yellow]已中断（{how}；正在跑的命令连同子进程已终止）。可以接着说下一步。[/]")
             except AgentError as exc:
                 self._end_text()
                 self._unspin()
                 logs.log.warning("这一问出错：%s", exc)
-                self.console.print(f"\n[red]{escape(str(exc))}[/]")
+                self._gap()
+                self.console.print(f"[red]{escape(str(exc))}[/]")
             except Exception as exc:
                 # 意料之外的错误（程序的 bug）：以前整个程序崩掉、对话也没了。现在记下调用栈，这一问作废，会话照常
                 self._end_text()
@@ -1063,7 +1081,8 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin, Tu
                 logs.log.exception("这一问遇到意料之外的错误")
                 where = f"，出错位置记在日志里：{logs.current()}" if logs.current() else ""
                 hint = f"{where}。可以接着说下一步；反馈问题时运行 /doctor copy"
-                self.console.print(f"\n[red]内部错误：{escape(type(exc).__name__)}: {escape(str(exc))}[/]"
+                self._gap()
+                self.console.print(f"[red]内部错误：{escape(type(exc).__name__)}: {escape(str(exc))}[/]"
                                    f"[dim]{escape(hint)}[/]")  # fmt: skip
             finally:
                 if self._watcher is not None:
