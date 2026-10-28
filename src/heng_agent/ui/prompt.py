@@ -70,7 +70,6 @@ STYLE = Style.from_dict(
         "bar.ctx-hot": "bold #e06c75",
         "bar.background": "bold #e5c07b",
         "bar.thinking": "bold #c678dd",
-        "bar.dev": "bold #ffffff bg:#c0399b",
         # 补全菜单：深色底、选中项用强调色整行高亮、说明文字灰色，滚动条与底色协调
         "completion-menu": "bg:#21252b",
         "completion-menu.completion": "bg:#21252b #abb2bf",
@@ -146,14 +145,13 @@ def human_tokens(n: int) -> str:
 
 
 def toolbar(mode: str, model: str, workdir: str, used: int, window: int, background: int = 0, *,
-            thinking: bool = False, compact_ratio: float = 0.8, dev: bool = False) -> FormattedText:  # fmt: skip
+            thinking: bool = False, compact_ratio: float = 0.8) -> FormattedText:  # fmt: skip
     pct = used / window * 100 if window else 0.0
     threshold = compact_ratio * 100
     mode_style = {"auto": "class:bar.mode-auto", "plan": "class:bar.mode-plan"}.get(mode, "class:bar.mode")
     ctx_style = "class:bar.ctx-hot" if pct >= threshold - 10 else "class:bar.ctx"
     short_dir = workdir if len(workdir) <= 48 else "…" + workdir[-47:]
     parts = [
-        *([("class:bar.dev", " 开发版 "), ("", " ")] if dev else []),  # 和正式版一眼分开
         (mode_style, f" {MODE_LABEL.get(mode, mode)} "),
         ("", "  "),
         ("class:bar.model", model),

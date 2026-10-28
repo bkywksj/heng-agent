@@ -9,7 +9,6 @@ import pytest
 
 from heng_agent import __version__
 from heng_agent.core import version
-from heng_agent.ui.prompt import toolbar
 
 
 def test_running_from_source_is_dev(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -47,13 +46,6 @@ def test_dev_home_copies_config_once(tmp_path: Path, monkeypatch: pytest.MonkeyP
     assert (dev / "config.json").read_text(encoding="utf-8") == "{}"
     monkeypatch.setenv("HENG_AGENT_CHANNEL", "release")
     assert version.prepare_dev_home(tmp_path / ".heng-agent-dev2") == ""  # 正式版不做这件事
-
-
-def test_toolbar_badge() -> None:
-    def text(dev: bool) -> str:
-        return "".join(part for _, part in toolbar("ask", "m", "/w", 0, 100, dev=dev))
-
-    assert "开发版" in text(True) and "开发版" not in text(False)
 
 
 def test_version_matches_pyproject() -> None:

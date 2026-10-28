@@ -404,7 +404,7 @@ class Repl:
         a = self.agent
         return toolbar(a.permissions.mode, self._model_label(), str(a.settings.workdir), a.last_input_tokens,
                        a.context_window, len(a.ctx.tasks.running()), thinking=a.thinking,
-                       compact_ratio=a.settings.compact_ratio, dev=is_dev())  # fmt: skip
+                       compact_ratio=a.settings.compact_ratio)  # fmt: skip
 
     def _set_mode(self, mode: str) -> None:
         self.agent.permissions.mode = mode  # type: ignore[assignment]
@@ -909,8 +909,8 @@ class Repl:
         mode = a.permissions.mode
         mode_text = "[bold black on yellow] auto 全部不问 [/]" if mode == "auto" else mode
         dev = is_dev()
-        version = escape(version_label()) + (f"  [bold white on magenta] 开发版 [/]  [dim]数据 {escape(str(s.home))}[/]"
-                                             if dev else "")  # fmt: skip
+        # 开发版只在标题旁显示一个徽标（以前版本行、状态栏也各有一个，满屏「开发版」）；这里只补一句数据目录
+        version = escape(version_label()) + (f"  [dim]数据 {escape(str(s.home))}[/]" if dev else "")
         rows = [
             ("目录", escape(str(s.workdir))),
             ("会话", session),

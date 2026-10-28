@@ -232,7 +232,7 @@ heng-agent --provider heng --model heng-mini-0.1
 | 命令 | `heng-agent` | `heng-dev`（`scripts/install_dev_command.py` 装一次；或直接跑仓库里的 `.venv/Scripts/heng-agent`） |
 | 代码 | 从打了标签的版本装进环境，装好就不变 | 直接跑仓库源码，改完立即生效 |
 | 数据 | `~/.heng-agent` | `~/.heng-agent-dev`（第一次运行从正式版复制一份配置，之后各改各的） |
-| 标记 | — | 欢迎页品红边框与「开发版」徽标、状态栏徽标、窗口标题，版本号带 git 位置 |
+| 标记 | — | 欢迎页品红边框、品红字标与「开发版」徽标，窗口标题带「[开发版]」，版本号带 git 位置 |
 
 是不是开发版看代码在哪儿就知道（仓库的 `src/` 下就是开发版），也可以用环境变量 `HENG_AGENT_CHANNEL=dev|release` 强制；
 `HENG_AGENT_HOME` 或 `--home` 可以直接指定数据目录。配置里有当前版本不认识的设置（新版写的）时只提示、不拦启动。

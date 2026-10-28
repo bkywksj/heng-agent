@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -79,7 +80,11 @@ def test_banner_logo_color_by_channel(tmp_path: Path, monkeypatch, dev: bool, sg
     styled = console.export_text(styles=True)
     for line in repl_mod.LOGO:  # 方块字标两行都在，正式版青色（36）、开发版品红（35）
         assert f"\x1b[1;{sgr}m{line}" in styled
-    assert ("开发版" in styled) is dev
+    # 开发版只在标题旁有一个徽标：以前版本行、状态栏也各有一个，满屏都是「开发版」。
+    # 窗口标题（\x1b]0;…\x07，显示在标签页上、不在画面里）里的那个有意保留，不算
+    on_screen = re.sub(r"\x1b\]0;.*?\x07", "", styled)
+    assert on_screen.count("开发版") == (1 if dev else 0)
+    assert ("\x1b]0;heng-agent [开发版]\x07" in styled) is dev
 
 
 def test_spinner_follows_events_and_stops_before_asking(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
