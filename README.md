@@ -238,6 +238,26 @@ heng-agent --provider heng --model heng-mini-0.1
 发布：改 `pyproject.toml` 与 `src/heng_agent/__init__.py` 里的版本号 → 在 CHANGELOG.md 记下改动 → 提交、打标签 `v版本号` →
 从标签构建安装包装成正式版（见 CHANGELOG.md 开头的「发布步骤」）。
 
+## 在编辑器里用（ACP）
+
+`heng-agent --acp` 以 [Agent Client Protocol](https://agentclientprotocol.com)（ACP）运行：编辑器或桌面应用通过标准输入输出
+驱动它，在自己的界面里聊天——流式显示回答、思考与工具调用，改文件、跑命令前在编辑器里弹窗确认（改文件时能直接看到改动对比），
+随时取消，也能列出、恢复以前的会话。支持 ACP 的客户端都能用，比如 Zed：
+
+```json
+{
+  "agent_servers": {
+    "heng-agent": { "command": "heng-agent", "args": ["--acp"] }
+  }
+}
+```
+
+其他支持 ACP 的客户端（JetBrains 系列 IDE 等）按各自的说明添加命令 `heng-agent --acp` 即可。
+
+- 服务商与密钥用 heng-agent 自己的配置（先在终端里运行一次 `heng-agent` 按引导配好）；
+- 权限模式在客户端的模式下拉框里切换（每次问 / 改文件不问 / 只读 / 全部放行）；
+- 项目里还没被信任的钩子与 MCP 服务在 ACP 模式下不加载（没法弹信任确认）：在终端里打开一次这个项目、确认信任即可。
+
 ## 脚本模式（-p）
 
 ```bash
