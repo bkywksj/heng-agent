@@ -76,6 +76,17 @@ heng-agent 的很多功能要在好几个地方一起登记，漏一处就会出
 | 3 | `ui/repl.py` | `HELP` 加一行 |
 | 4 | `pyproject.toml` | `package-data` 已经是 `prompts/*.md`，新文件自动打包——**别改成列文件名**（以前漏打包，装好就崩） |
 
+## 内置技能（随安装包给用户的技能）
+
+| # | 文件 | 改什么 |
+|---|---|---|
+| 1 | `src/heng_agent/skills/<名字>/SKILL.md` | frontmatter 写 `name`（与目录同名）与 `description`（多行用 `|`，要有「触发场景：」一行，模型靠它挑技能） |
+| 2 | `pyproject.toml` | `package-data` 已是 `skills/*/*.md`，新技能自动打包；技能目录下放别的文件要补对应的通配 |
+| 3 | `tests/test_builtin_skills.py` | `BUILTIN` 集合加上新名字 |
+| 4 | README | 「内置技能」表格加一行 |
+
+测试默认把内置技能目录指到空目录（`tests/conftest.py`），要用真实的内置技能请求 `real_builtin_skills` 夹具。
+
 ## 说明文件名（HENG.md、AGENTS.md、CLAUDE.md……）
 
 `core/compat.py` 的 `PROJECT_MEMORY_NAMES`（根目录读哪些）、`MEMORY_PRIORITY`（优先级从低到高）、

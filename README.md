@@ -172,6 +172,20 @@ heng-agent --provider heng --model heng-mini-0.1
   `/worktree` 列出、`/worktree switch 名字|main` 切换、`/worktree remove 名字` 删除（分支没合并就保留）。
   改完在工作树里 `/commit`，回主目录 `git merge heng/名字`——合并可能冲突，不自动做。
 
+## 内置技能
+
+装好就有、不用配置的技能，模型在任务对得上时自动读它的完整说明再动手（`/skills` 查看）：
+
+| 技能 | 什么时候用 |
+|---|---|
+| debugging | 报错、测试失败、行为不对：先复现、再定位、找到根因再修，最后加回归测试 |
+| writing-tests | 写测试：照项目已有的框架与风格，覆盖正常路径、边界与出错情况 |
+| refactoring | 重构：先有测试兜底，小步改、每步都验证，行为不变 |
+| codebase-tour | 读懂陌生项目：怎么跑起来、模块怎么分工、关键流程怎么走 |
+| security-check | 安全检查：密钥泄露、注入、越权、不安全的输入与依赖，按严重程度报告 |
+
+想按自己团队的习惯改写，在 `.heng-agent/skills/<同名>/SKILL.md`（项目）或 `~/.heng-agent/skills/`（用户）放一个同名技能即可替换。
+
 ## 兼容 Claude Code 与 AGENTS.md
 
 从别的编码工具转过来，项目里现成的配置直接能用，不用迁移：

@@ -79,6 +79,7 @@ core                消息与事件的数据类型、配置、错误、信任记
 | 很长的 heredoc / `python -c` | 会被截断或转义出错 | 先写成文件再运行 |
 | `git push` / `fetch` / `pull` | 会弹凭据窗卡住 | 推送走 Sigil |
 | Windows 上 heng-agent 开着时重装、升级它 | 加载的文件被占用，uv 装到一半失败，把环境删了一半，之后一启动就 `ModuleNotFoundError`（实测；也是全局命令以前莫名坏掉的原因） | 先关掉所有 heng-agent；`heng-agent upgrade` 会检查并在新窗口里等自己退出后再升级 |
+| 只按单行 `键: 值` 解析 frontmatter | `description: |` 只读到一个「|」，续行里带冒号的还被拆成乱字段——ruoyi-plus-uniapp 的 60 个技能在系统提示词里全没有说明（实测） | 用 `tools/skill.py` 的 `parse_frontmatter`（认多行文本、列表、续行），别自己再写一个 |
 | `ruff format` 后拿旧文字精确替换 | 格式化会把长行拆开，对不上 | 先看当前原文再改 |
 | `pipe = create_pipe_input().__enter__()`（不留上下文对象） | 函数一返回上下文对象被回收、管道随之关掉；Windows 的模拟输入关了还能写，Linux / macOS 是真管道，报 Bad file descriptor 或读到输入结束 | 把上下文对象存起来（见 `tests/test_config_ui.py` 的 `_OPEN_PIPES`），或用 `with` |
 | 测试的结果依赖「当前环境有没有终端、选择器能不能开」 | Windows CI 碰巧没有控制台走了一条路，Linux 上走了另一条；选择器读到输入结束会当成取消、抛 KeyboardInterrupt 让整轮测试中断 | 测哪条路就明确指定（monkeypatch `_choose`、`_stdin_is_terminal`） |
