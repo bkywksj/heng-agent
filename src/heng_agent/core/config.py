@@ -42,6 +42,11 @@ class Settings(BaseModel):
     )
     thinking: bool = Field(default=False, description="思考模式：先深度思考再回答（Anthropic 协议；/think 随时切换）")
     thinking_budget: int = Field(default=8000, ge=1024, description="思考预算（token），Anthropic 要求至少 1024")
+    effort: Literal["low", "medium", "high", "xhigh", "max"] | None = Field(
+        default=None,
+        description="思考强度：low / medium / high / xhigh / max（/effort 随时切换）；不设 = 服务的默认。"
+        "新 Claude 发 effort，只认预算的服务换算成预算，OpenAI 协议发 reasoning_effort",
+    )
     claude_user_config: bool = Field(
         default=True,
         description="读 Claude Code 的用户级配置（~/.claude 的 CLAUDE.md、技能、子智能体）；项目里的不受影响",

@@ -297,3 +297,17 @@ def test_print_above_needs_a_running_input_box() -> None:
     box = InputBox.__new__(InputBox)
     box.app = None
     assert box.print_above(lambda: None) is False
+
+
+def test_builtin_commands_do_not_wait_for_mcp(tmp_path: Path, gate: threading.Event) -> None:
+    """内置命令、# 记忆在本地处理，用不上 MCP：不等它连好（以前 /effort 也要等十几秒）。发给模型的话照样等。"""
+    manager = MCPManager(_configs(), tmp_path, background=True)
+    repl, console = _repl(tmp_path, manager)
+    lines = iter(["/version", "/exit"])
+    repl.read = lambda: next(lines)  # type: ignore[method-assign]
+    start = time.monotonic()
+    assert repl.loop() == 0
+    assert time.monotonic() - start < 3  # 闸门没放：要是等了，会一直等到闸门超时（10 秒）
+    assert "等待 MCP 服务连接" not in console.export_text()
+    gate.set()
+    manager.close()

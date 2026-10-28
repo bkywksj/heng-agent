@@ -39,9 +39,10 @@ from heng_agent.core.version import is_dev, version_label
 from heng_agent.hooks import Hook
 from heng_agent.hooks import trust as trust_hooks
 from heng_agent.mcp import MCPManager, ServerConfig
-from heng_agent.model import quota
+from heng_agent.model import quota, thinking
 from heng_agent.model.client import make_client
 from heng_agent.model.providers import load_profiles
+from heng_agent.model.thinking import EFFORT_NAME, EFFORTS
 from heng_agent.session import SessionStore
 from heng_agent.tools.shell import clip, run_command, shell_argv
 from heng_agent.tools.skill import skill_source
@@ -111,6 +112,7 @@ HELP = """查看状态
   /provider [名字]            切换服务商；/model [名字] 切换模型；/config provider 引导配置服务商与 API
   /mode ask|accept-edits|plan|auto   手动确认 / 自动改文件 / 计划模式 / 全部放行（Shift+Tab 循环切换）
   /think [on|off|预算|show]    思考模式：先深度思考再回答（难题用）
+  /effort [low…max|auto]     思考强度：low / medium / high / xhigh / max，auto = 服务默认
   /permissions                持久的允许 / 拒绝规则：allow bash(npm test)、deny、remove
   /config                     查看与修改配置
 
@@ -131,8 +133,8 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin):
     #: 内置命令：同名的自定义命令不生效
     BUILTIN = frozenset({"help", "clear", "mode", "model", "provider", "compact", "undo", "todo", "cost", "skills",
                          "mcp", "config", "rewind", "resume", "rename", "permissions", "copy", "export",
-                         "context", "diff", "memory", "doctor", "tasks", "think", "agents", "worktree", "exit",
-                         "quit", "terminal-setup", "usage", "status", "stats", "hooks", "todos", "version",
+                         "context", "diff", "memory", "doctor", "tasks", "think", "effort", "agents", "worktree",
+                         "exit", "quit", "terminal-setup", "usage", "status", "stats", "hooks", "todos", "version",
                          "bashes"})  # fmt: skip
 
     #: _choose 的返回值「选择器用不了、请退回打字」：给 ConfigCommand 等别的模块判断用
@@ -239,7 +241,8 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin):
         width = app.output.get_size().columns if app is not None else None
         branch, dirty = self._bar_git.value or (None, False)
         return toolbar(a.permissions.mode, self._model_label(), str(a.settings.workdir), a.last_input_tokens,
-                       a.context_window, len(a.ctx.tasks.running()), thinking=a.thinking,
+                       a.context_window, len(a.ctx.tasks.running()),
+                       thinking=thinking.bar_label(a.model_name, a.thinking, a.effort),
                        compact_ratio=a.settings.compact_ratio, mcp=mcp_view.toolbar_part(self), branch=branch,
                        dirty=dirty, speed=a.last_speed, width=width, custom=self._custom_line(),
                        quota=self._quota_part())  # fmt: skip
@@ -382,6 +385,8 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin):
         if cmd == "think" and not prior:
             return [("on", "打开思考模式", False), ("off", "关闭", False), ("show", "看最近一次思考", False),
                     ("16000", "把思考预算设为 16000 token 并打开", False)]  # fmt: skip
+        if cmd == "effort" and not prior:
+            return [(e, f"{EFFORT_NAME[e]}", False) for e in EFFORTS] + [("auto", "用服务的默认强度", False)]
         if cmd == "mcp":
             return mcp_view.arg_hints(self, prior)
         if cmd == "config" and not prior:
@@ -695,6 +700,8 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin):
             self.agents_command(rest)
         elif cmd == "/think":
             self.think_command(rest)
+        elif cmd == "/effort":
+            self.effort_command(rest)
         elif cmd == "/tasks":
             self.tasks_command(rest)
         elif cmd == "/permissions":
@@ -937,7 +944,10 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin):
                 continue
             if not self._plain_input:
                 self.echo_user(text)  # 输入框已被擦掉：把这句话留在对话记录里
-            self._sync_mcp()  # 后台连的 MCP 服务：处理这句输入之前接进来（还没连完就等）
+            # 后台连的 MCP 服务：发给模型的话要等它们连好（模型这一轮可能要用）；# 记忆与内置命令在本地处理、
+            # 用不上 MCP，不等——以前 /effort 这类命令也要等十几秒（真实终端里实测）
+            local = text.startswith("#") or (text.startswith("/") and text[1:].split(" ", 1)[0] in self.BUILTIN)
+            self._sync_mcp(wait=not local)
             if text.startswith("#") and not text.startswith("#!"):
                 with self._cancellable():
                     self.quick_memory(text)  # # 开头：记进 HENG.md，不发给模型

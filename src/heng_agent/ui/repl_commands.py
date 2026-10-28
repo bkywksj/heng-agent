@@ -15,6 +15,8 @@ from rich.panel import Panel
 from heng_agent import worktree
 from heng_agent.agents import create_agent, discover_agents
 from heng_agent.core.errors import AgentError
+from heng_agent.model.thinking import EFFORT_NAME, EFFORTS
+from heng_agent.model.thinking import describe as describe_thinking
 from heng_agent.tools.background import describe
 from heng_agent.tools.subagent import SubAgentTool
 from heng_agent.ui import agents_view, terminal_setup
@@ -166,12 +168,38 @@ class CommandsMixin:
         else:
             c.print("用法：/think（切换）、/think on|off、/think 16000（设预算）、/think show")
             return
-        state = f"已打开（预算 {a.thinking_budget} token）" if a.thinking else "已关闭"
-        c.print(f"✻ 思考模式{state}")
+        c.print(f"✻ 思考：{escape(describe_thinking(a.model_name, a.thinking, a.effort))}")
         profile = getattr(a.client, "profile", None)
         if a.thinking and profile is not None and profile.protocol == "openai":
             c.print("[dim]这个服务商走 OpenAI 协议：思不思考由模型本身决定（如 deepseek-reasoner 总会思考），"
                     "/think 对它不起作用；模型输出的思考过程照样会显示[/]")  # fmt: skip
+
+    def effort_command(self, rest: str) -> None:
+        """/effort：选思考强度；/effort high 直接设；/effort auto 回到服务默认。设了强度顺手打开思考。"""
+        a, c = self.agent, self.console
+        arg = rest.strip().lower()
+        if not arg:
+            options = [Option(e, f"{e}  {EFFORT_NAME[e]}") for e in EFFORTS] + [Option("auto", "auto  服务默认")]
+            # default 是序号：以前传了强度的名字，选择器里报错、被当成「这个终端用不了选择器」，
+            # 输入框也跟着退回成普通的逐行输入（真实终端里实测）
+            current = EFFORTS.index(a.effort) if a.effort in EFFORTS else len(EFFORTS)
+            picked = self._choose("思考强度（越高想得越多、越慢、越贵）", options, default=current)
+            if picked is None or picked is _PLAIN:
+                c.print(
+                    f"思考强度：{escape(a.effort or 'auto（服务默认）')}。用法：/effort low|medium|high|xhigh|max|auto"
+                )
+                return
+            arg = str(picked)
+        if arg not in (*EFFORTS, "auto"):
+            c.print("用法：/effort low|medium|high|xhigh|max|auto")
+            return
+        a.effort = None if arg == "auto" else arg  # type: ignore[assignment]
+        if a.effort:
+            a.thinking = True  # 设强度就是想让它想：顺手打开，不然还得再 /think on
+        c.print(f"✻ 思考：{escape(describe_thinking(a.model_name, a.thinking, a.effort))}")
+        profile = getattr(a.client, "profile", None)
+        if a.effort and profile is not None and profile.protocol == "openai" and a.effort in ("xhigh", "max"):
+            c.print("[dim]OpenAI 协议只有 low / medium / high：按 high 发[/]")
 
     def tasks_command(self, rest: str) -> None:
         """/tasks：列出后台任务；/tasks kill 任务号：停掉。"""

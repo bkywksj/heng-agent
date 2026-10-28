@@ -29,6 +29,7 @@ BUILTIN_HELP = {
     "permissions": "持久的允许 / 拒绝规则",
     "tasks": "后台任务（/tasks kill 任务号 停止）",
     "think": "思考模式开关（on / off / 预算 / show）",
+    "effort": "思考强度（low / medium / high / xhigh / max / auto）",
     "agents": "自定义子智能体角色（new 名字 新建）",
     "worktree": "git 工作树（new / switch / remove）",
     "terminal-setup": "让 Windows Terminal 的 Shift+Enter 能换行",
@@ -181,7 +182,7 @@ def context_bar(used: int, window: int, threshold: float) -> tuple[str, str]:
 
 
 def toolbar(mode: str, model: str, workdir: str, used: int, window: int, background: int = 0, *,
-            thinking: bool = False, compact_ratio: float = 0.8, mcp: tuple[str, str] | None = None,
+            thinking: str | None = None, compact_ratio: float = 0.8, mcp: tuple[str, str] | None = None,
             branch: str | None = None, dirty: bool = False, speed: float | None = None, width: int | None = None,
             custom: list[tuple[str, str]] | None = None,
             quota: tuple[str, str] | None = None) -> FormattedText:  # fmt: skip
@@ -204,7 +205,7 @@ def toolbar(mode: str, model: str, workdir: str, used: int, window: int, backgro
     return FormattedText([*line1, ("", "\n"), *line2])
 
 
-def info_line(model: str, workdir: str, used: int, window: int, *, thinking: bool, threshold: float,
+def info_line(model: str, workdir: str, used: int, window: int, *, thinking: str | None, threshold: float,
               mcp: tuple[str, str] | None, branch: str | None, dirty: bool, speed: float | None,
               width: int | None, quota: tuple[str, str] | None = None) -> list[tuple[str, str]]:  # fmt: skip
     pct = used / window * 100 if window else 0.0
@@ -221,7 +222,9 @@ def info_line(model: str, workdir: str, used: int, window: int, *, thinking: boo
             parts.append(("class:bar.branch", f"  {branch}{'*' if dirty else ''}"))
         parts += [SEP, ("class:bar.model", short_model if "provider" in drop else model)]
         if thinking:
-            parts.append(("class:bar.thinking", " ✻思考"))
+            parts.append(
+                ("class:bar.thinking", f" {thinking}")
+            )  # 「✻ high」：开着的思考与强度，见 model.thinking.bar_label
         if mcp:  # MCP 连接情况：(样式, 文字)，见 mcp_view.toolbar_part
             parts += [SEP, (mcp[0], mcp[1].strip())]
         if speed and "speed" not in drop:

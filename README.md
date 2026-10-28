@@ -206,6 +206,10 @@ heng-agent --provider heng --model heng-mini-0.1
   `settings.thinking` / `settings.thinking_budget` 里常开。思考过程不刷屏：等待动画里显示想了多少字，结束后折叠成一行。
   Anthropic 协议下思考块（带签名）原样存进历史、调工具后原样传回（服务要求）；OpenAI 协议（DeepSeek 推理模型等）
   是否思考由模型决定，`reasoning_content` 只显示、不进历史（传回去会报错）。
+- **思考强度**：`/effort` 选（或 `/effort high`、`/effort auto` 回到服务默认），也可写 `settings.effort`；状态栏显示 `✻ high`。
+  请求怎么写按模型自动适配：Claude 4.6 以后用自适应思考加 `effort`（low / medium / high / xhigh / max）；
+  Opus 5.5、Sonnet 5.5、Fable 的思考关不掉，`/think off` 时按 low 强度少想；更早的 Claude 与 DeepSeek、Kimi、GLM 等
+  仍用思考预算，强度换算成预算（low 2k … max 64k）；OpenAI 协议发 `reasoning_effort`（只有 low / medium / high）。
 - **自定义子智能体角色**：在 `.heng-agent/agents/名字.md`（项目）或 `~/.heng-agent/agents/`（用户）定义「测试员」「审查员」
   这类角色——开头写 `description`（模型据此挑）与 `tools`（不写就是只读），正文是它的提示词。模型用 `task` 工具派它们。
   只读角色不用确认、可以并行；带 `write_file` / `edit_file` / `bash` 的角色按你的权限模式确认、不并行，改的文件能 `/undo`。

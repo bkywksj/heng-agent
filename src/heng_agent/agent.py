@@ -105,6 +105,7 @@ class Agent:
         self._stop_depth = 0  # stop 钩子要求继续的嵌套层数
         self.thinking = settings.thinking  # 思考模式开关（/think 切换）
         self.thinking_budget = settings.thinking_budget
+        self.effort = settings.effort  # 思考强度（/effort 切换；None = 服务默认）
         self._session_note = ""  # session_start 钩子的输出（重建系统提示词时保留）
         if self.hooks.has("session_start"):
             outcome = self.hooks.run_event("session_start")
@@ -510,8 +511,9 @@ class Agent:
             thoughts: list[dict[str, Any]] = []  # 完整的思考块（带签名）：原样存进历史
             end = TurnEnd("end_turn")
             self._phase = "model"
-            if hasattr(self.client, "thinking_budget"):  # 每次请求前按当前开关设：/think 可以随时切
+            if hasattr(self.client, "thinking_budget"):  # 每次请求前按当前开关设：/think、/effort 可以随时切
                 self.client.thinking_budget = self.thinking_budget if self.thinking else 0
+                self.client.effort = self.effort
             first_output: float | None = None  # 第一段输出到达的时刻：速度从这里算，不含排队、读提示词的时间
             requested = time.monotonic()
             try:

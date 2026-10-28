@@ -36,6 +36,7 @@ from heng_agent.mcp import MCPManager, load_servers
 from heng_agent.mcp import is_trusted as mcp_is_trusted
 from heng_agent.model.client import make_client
 from heng_agent.model.providers import ENV_PROFILE, load_profiles
+from heng_agent.model.thinking import EFFORT_NAME, EFFORTS, can_disable
 from heng_agent.permissions import Permissions, Rules
 from heng_agent.session import SessionStore
 from heng_agent.tools.base import builtin_tools
@@ -112,7 +113,7 @@ def usable_profiles(agent: Agent) -> dict[str, Any]:
 
 
 def config_options(session: Session) -> list[Any]:
-    """会话配置项（ACP 的标准做法，取代旧的会话模式）：模型、权限模式、思考开关，客户端显示成下拉框。"""
+    """会话配置项（ACP 的标准做法，取代旧的会话模式）：模型、权限模式、思考（开关与强度），客户端显示成下拉框。"""
     agent = session.agent
     profiles = usable_profiles(agent)
     if session.provider not in profiles:  # 当前用的总要在列表里
@@ -128,10 +129,13 @@ def config_options(session: Session) -> list[Any]:
             id="mode", name="权限模式", category="mode", type="select", current_value=agent.permissions.mode,
             options=[option(value=k, name=name, description=desc) for k, (name, desc) in MODES.items()]),
         schema.SessionConfigOptionSelect(
+            # thought_level 本来就是「想多深」：关闭、开启（服务默认强度）、再按强度一档档列出来
             id="thinking", name="思考", category="thought_level", type="select",
-            current_value="on" if agent.thinking else "off",
-            options=[option(value="off", name="关闭"),
-                     option(value="on", name="开启", description="先思考再回答，更慢但更周全")]),
+            current_value=(agent.effort or "on") if agent.thinking else "off",
+            options=[option(value="off", name="关闭", description=None if can_disable(agent.model_name)
+                            else "这个模型关不掉思考：按 low 强度少想"),
+                     option(value="on", name="开启", description="先思考再回答，强度用服务默认"),
+                     *[option(value=e, name=f"开启 · {e}", description=f"强度{EFFORT_NAME[e]}") for e in EFFORTS]]),
     ]  # fmt: skip
 
 
@@ -256,8 +260,12 @@ class HengAgent(acp.Agent):
         agent = session.agent
         if config_id == "mode" and value in MODES:
             agent.permissions.mode = value  # type: ignore[assignment]
-        elif config_id == "thinking" and value in ("on", "off"):
-            agent.thinking = value == "on"
+        elif config_id == "thinking" and value in ("on", "off", *EFFORTS):
+            agent.thinking = value != "off"
+            if value in EFFORTS:
+                agent.effort = value  # type: ignore[assignment]
+            elif value == "on":
+                agent.effort = None
         elif config_id == "model":
             profiles, _ = load_profiles(agent.settings.home, agent.settings.workdir)
             if value not in profiles:

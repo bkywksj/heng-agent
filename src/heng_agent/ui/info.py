@@ -19,6 +19,7 @@ from rich.table import Table
 from heng_agent.context import estimate_tokens, load_memories
 from heng_agent.core.version import version_label
 from heng_agent.model.providers import Profile, load_profiles
+from heng_agent.model.thinking import describe as describe_thinking
 from heng_agent.ui import mcp_view
 from heng_agent.ui.prompt import MODE_LABEL, human_tokens
 
@@ -70,7 +71,7 @@ def show_status(repl: Repl) -> None:
         row("会话", f"{escape(session.id)}{title} · {len(a.messages)} 条消息 · [dim]{escape(str(session.path))}[/]")
     branch = _git_branch(a.settings.workdir)
     row("目录", escape(str(a.settings.workdir)) + (f"  [cyan]git {escape(branch)}[/]" if branch else ""))
-    thinking = f"开（预算 {a.thinking_budget}）" if a.thinking else "关"
+    thinking = describe_thinking(a.model_name, a.thinking, a.effort)
     row("权限", f"{escape(MODE_LABEL.get(a.permissions.mode, a.permissions.mode))} · 思考 {thinking}")
     used = a.last_input_tokens
     pct = used / a.context_window * 100 if a.context_window else 0

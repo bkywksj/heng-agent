@@ -20,6 +20,7 @@ from heng_agent.core import logs
 from heng_agent.core.errors import ModelError
 from heng_agent.core.net import http_client
 from heng_agent.core.types import Message, ModelEvent, TextDelta, ThinkingBlock, ThinkingDelta, ToolCall, TurnEnd
+from heng_agent.model import thinking
 from heng_agent.model.providers import Profile
 
 ANTHROPIC_VERSION = "2023-06-01"
@@ -231,6 +232,8 @@ class _HttpClient:
         self.on_retry: Callable[[str], None] | None = None
         #: 思考预算（token），0 = 不开思考。由智能体在每次请求前按 /think 的开关设置
         self.thinking_budget = 0
+        #: 思考强度（low…max，None = 服务默认）。由智能体在每次请求前按 /effort 设置；请求里怎么写见 model.thinking
+        self.effort: str | None = None
 
     def cancel(self) -> None:
         """从别的线程取消当前请求（ESC）。
@@ -315,13 +318,13 @@ class AnthropicClient(_HttpClient):
         if self.profile.prompt_cache:
             sys_blocks, messages = with_cache_marks(system, messages)
             sys_field = sys_blocks or system  # 没有系统提示词时保持空字符串，别发 "system": []
-        max_tokens = self.max_tokens
-        extra: dict[str, Any] = {}
-        if self.thinking_budget > 0:
-            # max_tokens 必须大于思考预算（否则服务拒收）：思考之外还要留出回答的空间
-            extra["thinking"] = {"type": "enabled", "budget_tokens": self.thinking_budget}
-            max_tokens = self.thinking_budget + self.max_tokens
-        else:
+        # 思考的写法按模型分（新 Claude 用 adaptive + effort，别的用 budget_tokens），见 model.thinking。
+        # max_tokens 要把思考的量加上：思考也算在里面，不加的话想一会儿回答就被截断（老写法下服务还会直接拒收）
+        plan = thinking.anthropic(self.profile.model, self.thinking_budget > 0, self.effort,
+                                  self.thinking_budget or thinking.EFFORT_BUDGET["medium"])  # fmt: skip
+        max_tokens = self.max_tokens + plan.extra_tokens
+        extra: dict[str, Any] = plan.body
+        if plan.strip_history:
             messages = strip_thinking(messages)  # 关了思考：历史里的思考块不再发
         body = {"model": self.profile.model, "max_tokens": max_tokens, "system": sys_field,
                 "messages": messages, "tools": tools, "stream": True, **extra}  # fmt: skip
@@ -374,6 +377,7 @@ class OpenAIClient(_HttpClient):
         }
         if tools:
             body["tools"] = to_openai_tools(tools)
+        body.update(thinking.openai(self.thinking_budget > 0, self.effort))
         url = f"{self.profile.base_url.rstrip('/')}/chat/completions"
         headers = self.profile.auth_headers()
         yield from self._with_retry(lambda: parse_openai_sse(self._post_stream(url, body, headers)))
