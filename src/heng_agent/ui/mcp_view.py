@@ -147,13 +147,15 @@ def toolbar_part(repl: Repl) -> tuple[str, str] | None:
         return None
     waiting = sum(1 for _, good, detail in entries if not good and detail == CONNECTING)
     ok = sum(1 for _, good, _ in entries if good)
+    # 只放「图标 MCP 已连上的数量」，不写中文说明：连接中、连好、连不上三种宽度一样，状态栏不跟着抖（用户要求）。
+    # 橙 = 还在连（图标转圈），绿 = 都连上了，红 = 有连不上的（/mcp 看原因）
     if waiting:
-        # 还在连的管理器：结果没登记，用「已连完几个」显示进度（每连完一个加一，不是 0 直接跳到全部）
-        done = sum(min(m.opened, len(m.configs)) for m in repl.mcp_managers if not m.ready)
+        # 还在连的管理器：结果没登记，用它实时数的「已连上几个」（每连上一个加一，不是 0 直接跳到全部）
+        live_ok = sum(min(m.connected, len(m.configs)) for m in repl.mcp_managers if not m.ready)
         frame = SPINNER[int(time.monotonic() * 10) % len(SPINNER)]  # 连接中由 Repl.watch_mcp 定时重画，转起来
-        return "class:bar.mcp-wait", f"  {frame} MCP 连接中 {ok + done}/{len(entries)}"
+        return "class:bar.mcp-wait", f"  {frame} MCP {ok + live_ok}"
     if ok < len(entries):
-        return "class:bar.mcp-fail", f"  MCP {ok}/{len(entries)} · {len(entries) - ok} 个连不上"
+        return "class:bar.mcp-fail", f"  ✗ MCP {ok}"
     return "class:bar.mcp", f"  ✓ MCP {ok}"
 
 

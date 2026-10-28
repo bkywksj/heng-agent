@@ -183,10 +183,10 @@ def test_toolbar_shows_live_mcp_status_and_wakes_input(tmp_path: Path, gate: thr
     woke = threading.Event()
     manager.on_done(woke.set)
     style, text = mcp_view.toolbar_part(repl) or ("", "")
-    assert style == "class:bar.mcp-wait" and text.endswith("MCP 连接中 0/3") and text.strip()[0] in mcp_view.SPINNER
+    assert style == "class:bar.mcp-wait" and text.endswith(" MCP 0") and text.strip()[0] in mcp_view.SPINNER
     gate.set()
     assert woke.wait(5)  # 连完（不论成败）回调一次，不用等用户提交输入
-    assert mcp_view.toolbar_part(repl) == ("class:bar.mcp-fail", "  MCP 2/3 · 1 个连不上")  # 还没 _sync_mcp 也是实时的
+    assert mcp_view.toolbar_part(repl) == ("class:bar.mcp-fail", "  ✗ MCP 2")  # 还没 _sync_mcp 也是实时的
     called: list[int] = []
     manager.on_done(lambda: called.append(1))  # 已经连完再登记：立刻调
     assert called == [1]
@@ -229,12 +229,14 @@ def test_toolbar_progress_counts_each_server_as_it_finishes(tmp_path: Path, monk
     def shown() -> str:
         return (mcp_view.toolbar_part(repl) or ("", ""))[1]
 
-    assert shown().endswith("连接中 0/3")
+    assert shown().endswith(" MCP 0")
     gates["second"].set()
     deadline = time.monotonic() + 5
     while manager.opened < 1 and time.monotonic() < deadline:
         time.sleep(0.01)
-    assert shown().endswith("连接中 1/3")
+    assert shown().endswith(" MCP 1") and shown().strip()[0] in mcp_view.SPINNER
+    # 连接中、连好、连不上三种写法一样宽：状态栏不因为 MCP 状态变化而抖（用户要求只放图标、MCP 与数量）
+    assert len(shown()) == len("  ✓ MCP 1") == len("  ✗ MCP 1")
     gates["first"].set()
     gates["third"].set()
     assert manager.wait(5)

@@ -401,6 +401,7 @@ class MCPManager:
         self._callbacks: list[Callable[[], None]] = []
         #: 已经连完（不论成败）的服务数：结果要全部连完才按顺序登记，状态栏靠它显示「连上了几个」
         self.opened = 0
+        self.connected = 0  # 其中连上了的：状态栏显示这个数
         self._started = time.monotonic()
         self.elapsed: float | None = None  # 全部连完用了多少秒（汇总行里显示）
         self._thread: threading.Thread | None = None
@@ -463,11 +464,14 @@ class MCPManager:
         self.status.append(entry)
 
     def _open_counted(self, config: ServerConfig) -> tuple[_Session, list[dict[str, Any]]] | AgentError:
+        result: Any = None
         try:
-            return self._open(config)
+            result = self._open(config)
+            return result
         finally:
             with self._done_lock:
                 self.opened += 1
+                self.connected += result is not None and not isinstance(result, AgentError)
 
     def _open(self, config: ServerConfig) -> tuple[_Session, list[dict[str, Any]]] | AgentError:
         """建连接并握手，返回 (连接, 工具定义) 或失败原因。不碰共享状态，可以在线程里并行跑。"""
