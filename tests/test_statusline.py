@@ -177,35 +177,39 @@ def test_background_refresh_does_not_stack() -> None:
 
 
 class _Timed:
-    """假模型：先停一下再一段段吐字，最后报 output_tokens；together=True 时模拟中转站攒齐了一次推过来。"""
+    """假模型：先「等」0.3 秒再一段段吐字，最后报 output_tokens；together=True 时模拟中转站攒齐了一次推过来。
 
-    def __init__(self, together: bool) -> None:
-        self.together = together
+    时间用假时钟（clock[0]，代替 agent 里的 time.monotonic）：以前真的 sleep，macOS 的 CI 机器上睡过了头，
+    算出来的速度偏低、测试时过时不过（发 0.4.0 时撞到）。
+    """
+
+    def __init__(self, together: bool, clock: list[float]) -> None:
+        self.together, self.clock = together, clock
 
     def stream(self, system: str, messages: list, tools: list):  # type: ignore[no-untyped-def]
-        import time
-
         from heng_agent.core.types import TextDelta, TurnEnd
 
-        time.sleep(0.3)
+        self.clock[0] += 0.3  # 排队、读提示词
         for _ in range(5):
             if not self.together:
-                time.sleep(0.06)
+                self.clock[0] += 0.06
             yield TextDelta("字")
         yield TurnEnd("end_turn", {"input_tokens": 10, "output_tokens": 30})
 
 
 @pytest.mark.parametrize("together", [False, True])
-def test_output_speed(tmp_path: Path, together: bool) -> None:
+def test_output_speed(tmp_path: Path, together: bool, monkeypatch: pytest.MonkeyPatch) -> None:
+    from heng_agent import agent as agent_module
     from heng_agent.agent import Agent
 
-    agent = Agent(Settings(workdir=tmp_path, home=tmp_path / "h"), _Timed(together))  # type: ignore[arg-type]
+    clock = [1000.0]
+    monkeypatch.setattr(agent_module.time, "monotonic", lambda: clock[0])
+    agent = Agent(Settings(workdir=tmp_path, home=tmp_path / "h"), _Timed(together, clock))  # type: ignore[arg-type]
     agent.run("你好", lambda e: None, lambda t, a: "once")
-    assert agent.last_speed is not None
-    if together:  # 一次推过来：按整个请求的用时（约 0.3 秒）算，不是除以几乎为 0 的时间
-        assert 50 < agent.last_speed < 110
-    else:  # 一段段来：按第一段到结束（约 0.3 秒）算，不含前面的等待
-        assert agent.last_speed > 70
+    if together:  # 一次推过来：按整个请求的用时（0.3 秒）算，不是除以几乎为 0 的时间
+        assert agent.last_speed == pytest.approx(30 / 0.3)
+    else:  # 一段段来：从第一段到结束（后 4 段，0.24 秒），不含前面 0.3 秒的等待
+        assert agent.last_speed == pytest.approx(30 / 0.24)
 
 
 @pytest.mark.parametrize(
