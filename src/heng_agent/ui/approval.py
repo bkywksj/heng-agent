@@ -50,8 +50,8 @@ class ApprovalMixin:
         c.print(Panel(Markdown(str(args.get("plan", ""))), title="[bold]计划[/]", border_style="cyan", padding=(0, 1)))
         with self._pause_watcher():
             picked = self._choose("按这个计划开始吗？", [
-                Option("once", "开始执行：改文件、跑命令前问我", "y", "切到 ask"),
-                Option("always", "开始执行：改文件不问，跑命令还问", "a", "切到 accept-edits"),
+                Option("once", "开始执行：改文件、跑命令前问我", "y", "切到「手动确认」"),
+                Option("always", "开始执行：改文件不问，跑命令还问", "a", "切到「自动改文件」"),
                 Option("deny", "继续规划", "n", "留在计划模式，接着说要改哪里（ESC 同样）"),
             ])  # fmt: skip
             if picked is _PLAIN:

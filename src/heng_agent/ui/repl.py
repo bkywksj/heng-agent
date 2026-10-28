@@ -109,7 +109,7 @@ HELP = """查看状态
 
 模型与权限
   /provider [名字]            切换服务商；/model [名字] 切换模型；/config provider 引导配置服务商与 API
-  /mode ask|accept-edits|plan|auto   每次问 / 改文件不问 / 先出计划 / 全部不问（Shift+Tab 循环切换）
+  /mode ask|accept-edits|plan|auto   手动确认 / 自动改文件 / 计划模式 / 全部放行（Shift+Tab 循环切换）
   /think [on|off|预算|show]    思考模式：先深度思考再回答（难题用）
   /permissions                持久的允许 / 拒绝规则：allow bash(npm test)、deny、remove
   /config                     查看与修改配置
@@ -563,7 +563,9 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin):
         if mcp_view.connecting(self):
             mcp_line = f"后台连接中（{len(mcp_view.connecting(self))} 个）"
         mode = a.permissions.mode
-        mode_text = "[bold black on yellow] auto 全部不问 [/]" if mode == "auto" else mode
+        mode_text = escape(MODE_LABEL.get(mode, mode))
+        if mode == "auto":  # 全部放行是危险模式：欢迎页上醒目标出
+            mode_text = f"[bold red]{mode_text}[/]"
         dev = is_dev()
         # 开发版只在标题旁显示一个徽标（以前版本行、状态栏也各有一个，满屏「开发版」）；这里只补一句数据目录
         version = escape(version_label()) + (f"  [dim]数据 {escape(str(s.home))}[/]" if dev else "")

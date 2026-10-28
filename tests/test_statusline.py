@@ -29,7 +29,7 @@ def test_wide_window_shows_everything() -> None:
                                 width=200, **FULL))  # fmt: skip
     for piece in ("▣ heng-agent", "master*", "yongye · claude-sonnet-5", "✓ MCP 6", "52t/s", "██", "23% 46k/200k"):
         assert piece in info
-    assert mode.startswith(" ⏵⏵ accept-edits 改文件不问")
+    assert mode.startswith(" ⏵⏵ 自动改文件 已开启")
 
 
 @pytest.mark.parametrize("width", [100, 80, 60, 50, 40])
@@ -37,7 +37,7 @@ def test_narrow_window_drops_by_priority_without_cutting(width: int) -> None:
     """以前一行全挤在一起，窄窗口里后半截直接被截掉（截图里「Shift+Tab 切换模式」只剩「Shi」）。"""
     info, mode = _lines(toolbar("ask", "yongye · claude-sonnet-5", r"E:\my\heng-agent", 46_000, 200_000,
                                 width=width, **FULL))  # fmt: skip
-    assert "▣ heng-agent" in info and "23%" in info and "ask 每次问" in mode  # 最要紧的始终在
+    assert "▣ heng-agent" in info and "23%" in info and "手动确认 已开启" in mode  # 最要紧的始终在
     if cell_len(info) >= width:  # 都去掉了还放不下（极窄）：至少已经去到最少
         assert "52t/s" not in info and "master" not in info and "yongye" not in info and "░" not in info
     order = ["52t/s", "master", "yongye", "46k/200k", "██"]  # 去掉的顺序：前面的先去
@@ -69,7 +69,7 @@ def test_custom_line_replaces_first_line() -> None:
     info, mode = _lines(
         toolbar("plan", "m", "w", 0, 1, custom=[("", " 我的状态栏")], mcp=("class:bar.mcp", "  ✓ MCP 6"))
     )
-    assert info == " 我的状态栏" and "plan 先出计划" in mode  # 权限模式那行照留
+    assert info == " 我的状态栏" and "计划模式 已开启" in mode  # 权限模式那行照留
     assert mode.endswith("· ✓ MCP 6")  # MCP 状态挪到第二行，不然看不到连接情况
 
 

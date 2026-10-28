@@ -80,7 +80,7 @@ def test_slash_commands(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
     repl.handle_command("/nope")
     assert repl.handle_command("/exit") is False
     text = console.export_text()
-    assert "权限模式：plan" in text and "不支持切换模型名" in text and "已切换到 deepseek" in text
+    assert "权限模式：计划模式（plan）" in text and "不支持切换模型名" in text and "已切换到 deepseek" in text
     assert "可选的服务商" in text and "已开始新会话" in text and "不认识的命令" in text
 
 

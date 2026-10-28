@@ -127,10 +127,10 @@ heng-agent --provider heng --model heng-mini-0.1
 | `--model` / `--base-url` | 临时覆盖模型名 / 地址 |
 | `--resume` | 接着这个目录上次的会话聊 |
 | `-p "任务"` | 非交互：执行完这一个任务就退出（需要确认的操作一律拒绝） |
-| `--permission-mode ask` | 默认：改文件、跑命令前都问你 |
-| `--permission-mode accept-edits` | 改文件不问，跑命令还问 |
+| `--permission-mode ask` | 默认，手动确认：改文件、跑命令前都问你 |
+| `--permission-mode accept-edits` | 自动改文件：改文件不问，跑命令还问 |
 | `--permission-mode plan` | 计划模式：只读代码，交出计划等你批准，批准后再动手（见下文「计划模式」） |
-| `--permission-mode auto` | 全部不问，直接执行（只在 CI、一次性沙箱等可信环境用；仍不能读写工作目录以外） |
+| `--permission-mode auto` | 全部放行：什么都不问，直接执行（相当于 Claude Code 的 bypass permissions；只在 CI、一次性沙箱等可信环境用；仍不能读写工作目录以外） |
 | `--workdir` | 指定工作目录（默认当前目录） |
 
 ## 界面里
@@ -290,7 +290,7 @@ heng-agent --provider heng --model heng-mini-0.1
 其他支持 ACP 的客户端（JetBrains 系列 IDE 等）按各自的说明添加命令 `heng-agent --acp` 即可。
 
 - 服务商与密钥用 heng-agent 自己的配置（先在终端里运行一次 `heng-agent` 按引导配好），或者由客户端启动时用环境变量给（见下）；
-- 客户端里有三个下拉框：模型（列出配好、能用的服务商）、权限模式（每次问 / 改文件不问 / 只读 / 全部放行）、思考（开 / 关）；
+- 客户端里有三个下拉框：模型（列出配好、能用的服务商）、权限模式（手动确认 / 自动改文件 / 计划模式 / 全部放行）、思考（开 / 关）；
 - 项目里还没被信任的钩子与 MCP 服务在 ACP 模式下不加载（没法弹信任确认）：在终端里打开一次这个项目、确认信任即可。
 
 ### 启动时用环境变量给服务商

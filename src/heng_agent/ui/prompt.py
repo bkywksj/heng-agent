@@ -1,6 +1,6 @@
 """输入框周边：斜杠命令补全、底部状态栏、权限模式列表与配色（输入框本身见 inputbox.py）。
 
-状态栏常驻在输入框下方：权限模式（auto 用醒目的黄底标出——全部不问是危险模式）、服务商与模型、工作目录、上下文用量。
+状态栏常驻在输入框下方，两行：第一行是项目、模型、MCP、上下文与额度；第二行是权限模式（auto 全部放行用红色标出）。
 """
 
 from __future__ import annotations
@@ -50,12 +50,12 @@ BUILTIN_HELP = {
     "exit": "退出",
 }
 MODES = ["ask", "accept-edits", "plan", "auto"]
-MODE_LABEL = {
-    "ask": "ask 每次问",
-    "accept-edits": "accept-edits 改文件不问",
-    "plan": "plan 先出计划",
-    "auto": "auto 全部不问",
-}
+#: 权限模式给人看的名字。照 Claude Code 的写法（「accept edits on」）只给一个好懂的名字，不再把配置里的写法
+#: （accept-edits）和说明拼在一起显示。auto 叫「全部放行」：它相当于 Claude Code 的 bypass permissions，
+#: 不是 Claude Code 那个由分类器替你判断的 auto mode，叫 auto 容易误会。配置与 /mode 的写法不变
+MODE_NAME = {"ask": "手动确认", "accept-edits": "自动改文件", "plan": "计划模式", "auto": "全部放行"}
+#: 列表、/status 里用：名字后面带上配置里的写法，知道 /mode 后面该打什么
+MODE_LABEL = {mode: f"{name}（{mode}）" for mode, name in MODE_NAME.items()}
 
 STYLE = Style.from_dict(
     {
@@ -63,7 +63,7 @@ STYLE = Style.from_dict(
         "frame-title": "nobold #5c6370",  # 边框上的按键提示：灰、不加粗，不抢输入的视线
         "flash": "#98c379",
         "todos": "#7f848e",
-        "bar.mode": "bold #61afef",
+        "bar.mode": "#7f848e",  # 手动确认是平常状态：灰色、不抢眼
         "bar.mode-edits": "bold #e5c07b",
         "bar.mode-auto": "bold #e06c75",
         "bar.mode-plan": "bold #98c379",
@@ -238,7 +238,8 @@ def info_line(model: str, workdir: str, used: int, window: int, *, thinking: boo
 def mode_line(mode: str, *, background: int, pct: float, threshold: float, window: int,
               width: int | None) -> list[tuple[str, str]]:  # fmt: skip
     icon = MODE_ICON.get(mode, "⏵")
-    parts: list[tuple[str, str]] = [(MODE_STYLE.get(mode, "class:bar.mode"), f" {icon} {MODE_LABEL.get(mode, mode)}")]
+    name = MODE_NAME.get(mode, mode)
+    parts: list[tuple[str, str]] = [(MODE_STYLE.get(mode, "class:bar.mode"), f" {icon} {name} 已开启")]
     hint = ("class:bar.dim", "  (Shift+Tab 切换)")
     extras: list[tuple[str, str]] = []
     if background:  # 还有后台任务在跑：显眼地标出来，免得忘了
