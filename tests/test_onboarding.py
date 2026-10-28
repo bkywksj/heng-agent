@@ -193,6 +193,6 @@ def test_list_providers_says_env_key_comes_from_env(monkeypatch: pytest.MonkeyPa
     monkeypatch.setenv("HENG_AGENT_API_KEY", "sk-test-not-real")
     assert cli.main(["--list-providers"]) == 0
     out = capsys.readouterr().out
-    env_line = out[out.index("* env") :]
-    assert "密钥：HENG_AGENT_API_KEY 已设置" in env_line and "已写在配置文件" not in env_line.split("\n* ")[0][:200]
+    env_rows = "\n".join(out[out.index("* env") :].splitlines()[:2])  # env 这一档的两行
+    assert "密钥：HENG_AGENT_API_KEY 已设置" in env_rows and "已写在配置文件" not in env_rows
     assert "sk-test-not-real" not in out
