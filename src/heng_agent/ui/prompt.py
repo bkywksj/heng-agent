@@ -51,7 +51,7 @@ MODES = ["ask", "accept-edits", "plan", "auto"]
 MODE_LABEL = {
     "ask": "ask 每次问",
     "accept-edits": "accept-edits 改文件不问",
-    "plan": "plan 只读",
+    "plan": "plan 先出计划",
     "auto": "auto 全部不问",
 }
 
