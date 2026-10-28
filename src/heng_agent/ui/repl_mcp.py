@@ -159,6 +159,8 @@ class McpMixin:
         if shown_connecting:  # 欢迎页已经显示过结果的就不重复打印
             for line in mcp_view.startup_line(self):
                 self.console.print(line)
+            # 段后空一行：这段可能打在输入框上方、也可能夹在提问和回复之间，不空行就和下一段贴在一起（用户反馈太挤）
+            self.console.print()
 
     def _set_mcp_status(self, name: str, ok: bool, detail: str) -> None:
         for i, (old, _, _) in enumerate(self.mcp_status):
