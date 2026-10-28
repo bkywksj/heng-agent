@@ -209,6 +209,11 @@ class TurnMixin:
 
     def _turn_live_text(self) -> AnyFormattedText:
         """输入框上方那块：还没写完的那段回复（最后几行）+ 转圈与计时。每 0.1 秒重画时调。"""
+        real = self._turn_real_console
+        # 往输入框上方打印用的那个控制台宽度是一问开始时定的：窗口中途变窄后它还按旧宽度排版，终端再折一次，
+        # 段落断得七零八落（窗口缩小时实测）。这里每 0.1 秒跟一次真实窗口的宽度
+        if self.console is not real and self.console.width != real.width:
+            self.console.width = real.width
         parts: list[Any] = []
         if self._turn_live_render is not None:
             parts.append(self._turn_live_render)
@@ -216,7 +221,6 @@ class TurnMixin:
             parts.append(_Spinner(self._turn_activity))
         if not parts:
             return ""
-        real = self._turn_real_console
         out = io.StringIO()
         Console(file=out, force_terminal=True, color_system=real.color_system or "standard", width=real.width,
                 legacy_windows=False, highlight=False).print(Group(*parts))  # fmt: skip

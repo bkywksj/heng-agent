@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import io
 import threading
 import time
 from collections.abc import Iterator
@@ -202,3 +203,48 @@ def test_escape_with_draft_still_interrupts_and_keeps_draft(live: Any) -> None:
     with pytest.raises(KeyboardInterrupt):
         _run(repl, "你好")
     assert repl._prefill == "写了一半" and repl._queued == ["排着队的"]
+
+
+def test_reflowed_rows() -> None:
+    from heng_agent.ui.inputbox import reflowed_rows
+
+    assert reflowed_rows([125, 125, 10], 123) == 5  # 两行占满的边框各折成两行
+    assert reflowed_rows([125, 0], 200) == 2  # 变宽不折；空行也占一行
+    assert reflowed_rows([300], 100) == 3
+
+
+def test_shrinking_window_backs_off_the_reflowed_rows(tmp_path: Path) -> None:
+    """窗口变窄后重画前，光标先多往上退「被终端折出来的行数」：以前只退原来的行数，旧输入框的上边框留在屏幕上
+    （拔掉显示器、窗口缩小时实测，窄两列就复现）。"""
+    from types import SimpleNamespace
+
+    from prompt_toolkit.data_structures import Point, Size
+
+    from heng_agent.ui.inputbox import _erase_reflowed_on_resize
+
+    moved: list[int] = []
+    rows = {0: {124: SimpleNamespace(char="╮", width=1)}, 1: {124: SimpleNamespace(char="│", width=1)}}
+    renderer = SimpleNamespace(render=lambda *a, **k: None, erase=lambda *a, **k: None, _cursor_pos=Point(3, 2),
+                               _last_size=Size(rows=30, columns=125),
+                               _last_screen=SimpleNamespace(data_buffer=rows))  # fmt: skip
+    output = SimpleNamespace(get_size=lambda: Size(rows=30, columns=123), cursor_up=moved.append)
+    app = SimpleNamespace(renderer=renderer, output=output)
+    _erase_reflowed_on_resize(app)  # type: ignore[arg-type]
+    renderer.render(app, None)
+    assert moved == [2]  # 光标上面两行（都占满 125 列）在 123 列里各折成两行：多退 2 行
+    moved.clear()
+    output.get_size = lambda: Size(rows=30, columns=125)  # 没变窄：不多退
+    renderer.erase()
+    assert moved == []
+
+
+def test_turn_output_follows_window_width(tmp_path: Path) -> None:
+    """回答中往输入框上方打印的宽度跟着真实窗口走：以前固定为一问开始时的宽度，窗口变窄后段落断得七零八落。"""
+    repl = Repl(Agent(Settings(workdir=tmp_path, home=tmp_path / "h"), FakeModel([])))
+    real = Console(width=120, file=io.StringIO(), force_terminal=True)
+    repl._turn_real_console = real
+    repl.console = Console(width=120, file=io.StringIO(), force_terminal=True)
+    repl._turn_live_render = repl._turn_activity = None
+    real.width = 90
+    repl._turn_live_text()
+    assert repl.console.width == 90

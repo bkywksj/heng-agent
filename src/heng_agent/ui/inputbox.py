@@ -42,6 +42,7 @@ from prompt_toolkit.styles import Style
 from prompt_toolkit.utils import get_cwidth
 from prompt_toolkit.widgets import SearchToolbar
 
+from heng_agent.core import logs
 from heng_agent.tools.paths import SKIP_DIRS
 from heng_agent.ui.prompt import CmdCompletion
 from heng_agent.ui.winkeys import enable_shift_enter
@@ -590,6 +591,7 @@ class InputBox:
         # 另一个等待：有 Alt+V、Alt+Enter 这些「ESC 开头」的组合键绑定时，单独的 ESC 还要再等 timeoutlen（默认 1 秒）
         # 看后面跟不跟键——两次 ESC 各被拖近 1 秒，间隔超出双击窗口，双击 ESC 就认不出来（实测卡住）
         app.timeoutlen = KEY_SEQUENCE_TIMEOUT
+        _erase_reflowed_on_resize(app)
         # 计时、转圈、流式文字要动起来；平时有后台子智能体在跑时面板上的用时也要动
         app.refresh_interval = 0.1 if self.turn is not None else 0.5
         self._buffer = buffer
@@ -615,3 +617,57 @@ class InputBox:
             pending = bool(self._signals)
         if pending:  # 收起期间来了信号（如确认完之后这一问正好结束）：一画出来就收
             self._exit_for_signal(app, None)
+
+
+# ---------- 窗口变窄时擦干净 ----------
+
+
+def reflowed_rows(widths: list[int], columns: int) -> int:
+    """这些行（各自已经画出的宽度）在 columns 列宽的终端里一共占几行：放不下的被终端折成好几行。"""
+    return sum(max(1, -(-w // columns)) for w in widths) if columns > 0 else len(widths)
+
+
+def _row_width(row: Any) -> int:
+    """渲染出来的一行实际写到了第几列（汉字占两格；后面的空格没写出去，不算）。"""
+    return max((x + getattr(ch, "width", 1) for x, ch in row.items() if str(getattr(ch, "char", "")).strip()),
+               default=0)  # fmt: skip
+
+
+def _erase_reflowed_on_resize(app: Application[Any]) -> None:
+    """窗口变窄时，先把被终端折行多出来的行数也往上退掉，再照常擦掉重画。
+
+    prompt_toolkit 尺寸变了时按「上次画了几行」把光标往上退、擦掉重画。可 Windows Terminal 会把超出新宽度的行
+    折成好几行（输入框的边框正好占满整行，窄一列就全折），往上退的行数就不够，旧输入框的上边框留在屏幕上
+    （拔掉显示器、窗口被系统缩小时实测，窄两列就复现）。用上次画出的每行宽度算出折行后的行数，补上差的。
+
+    两条路都要管：定时重画时渲染器自己发现尺寸变了（输入框每 0.5 秒重画一次，多半是它先撞上——只挂改尺寸的
+    回调时实测没修好），和 prompt_toolkit 轮询到尺寸变化后的擦除重画。读的是渲染器的内部状态：读不到就照原来的
+    做法（日志里记一笔），不影响使用。
+    """
+    renderer = app.renderer
+
+    def back_off_reflowed() -> None:
+        try:
+            screen, size, cursor = renderer._last_screen, renderer._last_size, renderer._cursor_pos
+            columns = app.output.get_size().columns
+            if screen is None or size is None or not 0 < columns < size.columns or cursor.y <= 0:
+                return
+            widths = [_row_width(screen.data_buffer.get(y, {})) for y in range(cursor.y)]
+            extra = reflowed_rows(widths, columns) - cursor.y
+            if extra > 0:
+                app.output.cursor_up(extra)
+        except Exception:  # 内部状态变了（prompt_toolkit 升级）：退回原来的做法
+            logs.log.warning("窗口变窄时计算折行失败，按原来的方式擦除", exc_info=True)
+
+    original_render, original_erase = renderer.render, renderer.erase
+
+    def render(*args: Any, **kwargs: Any) -> None:
+        back_off_reflowed()  # 尺寸变了的话，渲染器接着会从「它以为的」开头擦掉重画
+        original_render(*args, **kwargs)
+
+    def erase(*args: Any, **kwargs: Any) -> None:
+        back_off_reflowed()
+        original_erase(*args, **kwargs)
+
+    renderer.render = render  # type: ignore[method-assign]
+    renderer.erase = erase  # type: ignore[method-assign]
