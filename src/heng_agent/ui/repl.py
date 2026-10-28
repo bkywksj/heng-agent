@@ -34,7 +34,16 @@ from heng_agent.context import (
 from heng_agent.core import logs
 from heng_agent.core.compat import PROJECT_MEMORY_NAMES, claude_home
 from heng_agent.core.errors import AgentError
-from heng_agent.core.types import AgentEvent, Notice, TextDelta, ThinkingDelta, ToolFinished, ToolStarted, TurnDone
+from heng_agent.core.types import (
+    AgentEvent,
+    Notice,
+    TextDelta,
+    ThinkingDelta,
+    ToolFinished,
+    ToolStarted,
+    TurnDone,
+    UserInterjection,
+)
 from heng_agent.core.version import is_dev, version_label
 from heng_agent.hooks import Hook
 from heng_agent.hooks import trust as trust_hooks
@@ -505,7 +514,11 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin, Tu
             return
         self._end_text()
         self._unspin()
-        if isinstance(event, Notice):
+        if isinstance(event, UserInterjection):  # 回答中插的话已经交给模型：照提问的样子显示在它该在的位置
+            c.print()  # 和上面的工具结果隔开一行，不然竖条紧贴着命令输出（实测）
+            self.echo_user(event.text, restart_timer=False)
+            self._spin("思考中…")
+        elif isinstance(event, Notice):
             c.print(f"[yellow]⋯ {escape(event.text)}[/]")
             self._spin("处理中…")
         elif isinstance(event, ToolStarted):
@@ -858,7 +871,7 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin, Tu
             line = line[:-1] + "\n" + self._input("… ")
         return line.strip()
 
-    def echo_user(self, text: str) -> None:
+    def echo_user(self, text: str, restart_timer: bool = True) -> None:
         """输入框提交后已被擦掉：把这句话用醒目的标记打印到对话记录里，和模型回复区分开。
 
         里面指向真实文件的 @引用 与绝对路径渲染成超链接（见 linkify）。"""
@@ -868,7 +881,8 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin, Tu
             # 文字也上色（和竖条同色）：长对话里一眼扫得到哪些是自己问的（用户对照 Kimi 的样子提的）
             self.console.print(f"[bold cyan]{PROMPT_BAR}[/] [bold cyan]{linkify(line, workdir)}[/]")
         self.console.print()  # 和下面的「思考中」、回复拉开一点，不挤
-        self._turn_started = time.time()  # 这一问从这里开始算用时（每问结尾的那行灰字）
+        if restart_timer:  # 回答中插的话、马上执行的命令不重新计时：用时算的还是这一问
+            self._turn_started = time.time()  # 这一问从这里开始算用时（每问结尾的那行灰字）
 
     def show_thumbnails(self, pictures: list[str]) -> None:
         """附上的图片在终端里画缩略图（Sixel），最多 3 张。只在支持的终端里画：不支持的会刷一屏乱码。"""

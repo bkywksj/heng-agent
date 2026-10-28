@@ -99,7 +99,8 @@ class TurnHooks:
     """一问正在进行时输入框要用的东西（Repl 提供）。
 
     live：输入框上方「正在进行」那块的内容（转圈与计时、还没写完的那段回复），每 0.1 秒重画一次；
-    queued：排着队、这一问结束后发出的消息；interrupt：ESC / Ctrl+C 打断这一问；detach：Ctrl+B 前台命令转后台；
+    queued：排着队的话（普通的话在这批工具跑完时插进这一问，命令等这一问结束再执行）；
+    interrupt：ESC / Ctrl+C 打断这一问；detach：Ctrl+B 前台命令转后台；
     before_draw：每次画出输入框之前调（Repl 把攒着、还没打到屏幕上的输出先打出来）。
     """
 
@@ -108,6 +109,7 @@ class TurnHooks:
     interrupt: Callable[[str], None]
     detach: Callable[[], None]
     before_draw: Callable[[], None]
+    take_queued: Callable[[], list[str]] = lambda: []  # ↑ 把排着队的话全部取回输入框里改
 
 
 @dataclass(frozen=True)
@@ -217,6 +219,18 @@ class InputBox:
             )
             self.set_mode(nxt)
             event.app.invalidate()
+
+        @kb.add("up", filter=Condition(lambda: self.turn is not None and bool(self.turn.queued())
+                                     and buffer.document.cursor_position_row == 0))  # fmt: skip
+        def _take_back(event: KeyPressEvent) -> None:
+            # 回答中、光标在第一行：把排着队的话全部取回来改（和 Claude Code 一样，一条一行，放在已经敲的字前面）。
+            # 改完 Enter 重新排进去；清空就是不发了
+            if self.turn is None:
+                return
+            taken = self.turn.take_queued()
+            if taken:
+                text = "\n".join(taken) + ("\n" + buffer.text if buffer.text else "")
+                buffer.document = Document(text, len(text))
 
         @kb.add("c-b", filter=Condition(lambda: self.turn is not None))
         def _detach(event: KeyPressEvent) -> None:
@@ -381,7 +395,12 @@ class InputBox:
 
         def queued_text() -> list[tuple[str, str]]:
             items = self.turn.queued() if self.turn else []
-            return [("class:queued", "\n".join(f" ⧗ 排队：{q.splitlines()[0][:80]}" for q in items))]
+            rows = []
+            for q in items:
+                when = "结束后执行" if q.lstrip()[:1] in ("/", "!", "#") else "工具跑完后插进这一问"
+                rows.append(f" ⧗ 排队（{when}）：{q.splitlines()[0][:80]}")
+            rows.append(" ↑ 取回来改")
+            return [("class:queued", "\n".join(rows))]
 
         queued = ConditionalContainer(
             Window(FormattedTextControl(queued_text), dont_extend_height=True),

@@ -31,6 +31,10 @@ if TYPE_CHECKING:
 
 #: 「正在进行」那块最多画几行：还没写完的那段回复很长时只显示最后这些行（写完的段落会打印到上方）
 LIVE_MAX_LINES = 12
+#: 回答中也马上执行的命令：只看状态、或改下一次请求才生效的设置（同 Claude Code：/status、/usage、/tasks、/effort……）。
+#: 别的命令（会动对话、切服务商、要你选东西的）排队，这一问结束后执行
+INSTANT_COMMANDS = frozenset({"status", "usage", "cost", "stats", "tasks", "bashes", "context", "todos",
+                              "effort", "think"})  # fmt: skip
 
 
 class _AboveWriter(io.TextIOBase):
@@ -104,8 +108,11 @@ class TurnMixin:
             finally:
                 box.signal("done", before=writer.drain)
 
-        box.turn = TurnHooks(live=self._turn_live_text, queued=lambda: self._queued, interrupt=self._turn_interrupt,
-                             detach=self.agent.ctx.detach.set, before_draw=writer.drain)  # type: ignore[attr-defined]  # fmt: skip
+        self._queue_lock = threading.Lock()
+        box.turn = TurnHooks(live=self._turn_live_text, queued=lambda: list(self._queued),
+                             interrupt=self._turn_interrupt, detach=self.agent.ctx.detach.set, before_draw=writer.drain,
+                             take_queued=self._take_queued)  # type: ignore[attr-defined]  # fmt: skip
+        self.agent.interjections = self._take_interjections  # 每批工具跑完时，排着队的普通的话插进这一问
         # 主循环在这之前已经用 rich 的 Status 转起了「思考中」：它有自己的线程，一直往光标所在处画——光标此刻在
         # 输入框里，于是「思考中」画进了输入框、盖住 ›，直到模型回来第一段才停（真实终端里实测，不是一闪而过）。
         # 先停掉它，再把转圈交给输入框上方那一行
@@ -125,10 +132,18 @@ class TurnMixin:
                         self._serve_approval(real, writer)
                     continue
                 draft = ""
-                if result.strip():
-                    self._queued.append(result)  # type: ignore[attr-defined]  # 这一问结束后按顺序发出
+                if not result.strip():
+                    continue
+                name = result.strip()[1:].split(" ", 1)[0] if result.strip().startswith("/") else ""
+                if name in INSTANT_COMMANDS:  # 只看状态、改下次请求的设置：马上执行，不排队
+                    self.echo_user(result, restart_timer=False)  # type: ignore[attr-defined]
+                    self.handle_command(result.strip())  # type: ignore[attr-defined]
+                    continue
+                with self._queue_lock:
+                    self._queued.append(result)  # type: ignore[attr-defined]
         finally:
             worker.join()
+            self.agent.interjections = None
             box.turn = None
             self.console = real
             writer.drain()  # 还有没打出来的（输入框收起后才写的）直接打
@@ -167,6 +182,19 @@ class TurnMixin:
             self.console = capture
             self._turn_approval = None
             done.set()
+
+    def _take_interjections(self) -> list[str]:
+        """后台线程（智能体）在每批工具跑完时调：把排着队的普通的话取走、插进这一问。命令（/ ! #）留着，结束后执行。"""
+        with self._queue_lock:
+            said = [q for q in self._queued if q.lstrip()[:1] not in ("/", "!", "#")]  # type: ignore[attr-defined]
+            self._queued[:] = [q for q in self._queued if q not in said]  # type: ignore[attr-defined]
+        return said
+
+    def _take_queued(self) -> list[str]:
+        """输入框里按 ↑：排着队的全部取回来改（界面线程调）。"""
+        with self._queue_lock:
+            taken, self._queued[:] = list(self._queued), []  # type: ignore[attr-defined]
+        return taken
 
     def _turn_interrupt(self, how: str) -> None:
         """ESC / Ctrl+C：打断这一问（智能体在后台线程，取消靠标志与关掉连接）。"""

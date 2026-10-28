@@ -32,6 +32,7 @@ from heng_agent.core.types import (
     ToolStarted,
     TurnDone,
     TurnEnd,
+    UserInterjection,
 )
 from heng_agent.hooks import Hook, HookRunner
 from heng_agent.model.client import ModelClient
@@ -106,6 +107,9 @@ class Agent:
         self.thinking = settings.thinking  # 思考模式开关（/think 切换）
         self.thinking_budget = settings.thinking_budget
         self.effort = settings.effort  # 思考强度（/effort 切换；None = 服务默认）
+        #: 回答过程中用户插的话（交互界面设上；-p、ACP 不设）：每批工具跑完时取一次，接在工具结果后面交给模型，
+        #: 和 Claude Code 一样——不用等这一问整个结束，模型在下一步就能看到
+        self.interjections: Callable[[], list[str]] | None = None
         self._session_note = ""  # session_start 钩子的输出（重建系统提示词时保留）
         if self.hooks.has("session_start"):
             outcome = self.hooks.run_event("session_start")
@@ -590,6 +594,10 @@ class Agent:
                 results = self._execute_all(calls, on_event, approve)
             finally:
                 self._phase = None
+            extra = self.interjections() if self.interjections is not None else []
+            for said in extra:  # 工具结果在前、插的话在后（服务要求 tool_result 排在这条消息的最前面）
+                results.append({"type": "text", "text": said})
+                on_event(UserInterjection(said))
             self.messages.append({"role": "user", "content": results})
             self._save()
         else:

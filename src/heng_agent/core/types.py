@@ -103,4 +103,11 @@ class Notice:
     text: str
 
 
-AgentEvent = TextDelta | ToolStarted | ToolFinished | TurnDone | Notice | ThinkingDelta
+@dataclass(frozen=True)
+class UserInterjection:
+    """回答过程中用户插的话：已经接在这批工具结果后面交给模型（界面照提问的样子把它显示出来）。"""
+
+    text: str
+
+
+AgentEvent = TextDelta | ToolStarted | ToolFinished | TurnDone | Notice | ThinkingDelta | UserInterjection

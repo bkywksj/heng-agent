@@ -137,3 +137,56 @@ def test_rich_spinner_is_stopped_so_it_cannot_draw_into_the_box(live: Any) -> No
     _run(repl, "你好")
     status, activity = seen[0]
     assert status is None and activity is not None  # rich 的转圈停了，转圈交给了输入框上方那一行
+
+
+# ---------- 第 2 步：插话接进正在跑的这一问 ----------
+
+
+def test_agent_puts_interjection_after_tool_results(tmp_path: Path) -> None:
+    """每批工具跑完时取一次插话，接在工具结果后面（服务要求 tool_result 排在最前），模型下一步就能看到。"""
+    from heng_agent.core.types import UserInterjection
+
+    model = FakeModel([[("tool", "glob", {"pattern": "*.py"})], ["好的，顺便看了"]])
+    agent = Agent(Settings(workdir=tmp_path, home=tmp_path / "h"), model)
+    pending = [["顺便看看 README"], []]
+    agent.interjections = lambda: pending.pop(0)
+    events: list[Any] = []
+    agent.run("找找 py 文件", events.append, lambda t, a: "once")
+    second = model.calls[1][-1]["content"]
+    assert second[0]["type"] == "tool_result" and second[-1] == {"type": "text", "text": "顺便看看 README"}
+    assert [e.text for e in events if isinstance(e, UserInterjection)] == ["顺便看看 README"]
+
+
+def test_typed_text_during_tools_is_delivered_in_the_same_turn(live: Any) -> None:
+    make, pipe = live
+    model = SlowModel([[("tool", "glob", {"pattern": "*"})], ["收到"]], delay=0.8)
+    repl, console = make(model)
+    threading.Timer(0.3, pipe.send_text, ["顺便说一句\r"]).start()  # 第一轮模型还在想（工具还没跑）时敲下
+    _run(repl, "你好")
+    assert repl._queued == []  # 没留到这一问结束之后：已经插进去了
+    assert any(b == {"type": "text", "text": "顺便说一句"} for b in model.calls[1][-1]["content"])
+    assert "▌ 顺便说一句" in console.export_text()  # 照提问的样子显示在它该在的位置
+
+
+def test_commands_typed_during_turn(live: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """只看状态、改下次请求的命令马上执行；会动对话的命令排队，这一问结束后执行（也不会被当成插话交给模型）。"""
+    make, pipe = live
+    model = SlowModel([[("tool", "glob", {"pattern": "*"})], ["好"]], delay=0.8)
+    repl, _ = make(model)
+    threading.Timer(0.2, pipe.send_text, ["/effort high\r"]).start()
+    threading.Timer(0.4, pipe.send_text, ["/clear\r"]).start()
+    _run(repl, "你好")
+    assert repl.agent.effort == "high"  # 马上生效
+    assert repl._queued == ["/clear"]  # 留着，结束后由主循环执行
+    assert all(b.get("text") != "/clear" for b in model.calls[1][-1]["content"])
+
+
+def test_up_arrow_takes_queued_back(live: Any) -> None:
+    make, pipe = live
+    repl, _ = make(SlowModel([["好"]], delay=1.2))
+    UP = "\x1b[A"
+    threading.Timer(0.2, pipe.send_text, ["第一句\r"]).start()
+    threading.Timer(0.4, pipe.send_text, ["第二句\r"]).start()
+    threading.Timer(0.6, pipe.send_text, [UP]).start()  # 取回来：排队的清空、都回到输入框里
+    _run(repl, "你好")
+    assert repl._queued == [] and repl._prefill == "第一句\n第二句"  # 没发出去，下次输入框里接着改
