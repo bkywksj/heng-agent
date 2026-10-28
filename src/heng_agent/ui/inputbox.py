@@ -387,6 +387,8 @@ class InputBox:
             Window(FormattedTextControl(queued_text), dont_extend_height=True),
             filter=Condition(lambda: bool(self.turn and self.turn.queued())),
         )
+        # 回答中在「正在进行」与输入框之间空一行：不空的话正在写的那段紧贴着输入框的上边框，看着挤（用户反馈）
+        gap = ConditionalContainer(Window(height=Dimension.exact(1)), filter=turn_active)
         flash = ConditionalContainer(
             Window(FormattedTextControl(lambda: [("class:flash", f" {self.flash}")]), height=1),
             filter=Condition(lambda: bool(self.flash)),
@@ -395,7 +397,9 @@ class InputBox:
         menu_space = ConditionalContainer(Window(height=Dimension.exact(MENU_ROWS)), filter=has_completions)
         root = FloatContainer(
             # 顶部对齐：光标下方多出来的空间留在最下面，不分给输入框
-            content=HSplit([live, queued, todo_box, frame, search, status, flash, menu_space], align=VerticalAlign.TOP),
+            content=HSplit(
+                [live, queued, gap, todo_box, frame, search, status, flash, menu_space], align=VerticalAlign.TOP
+            ),
             floats=[Float(xcursor=True, ycursor=True, content=CompletionsMenu(max_height=MENU_ROWS, scroll_offset=1))],
         )
         return root, body
