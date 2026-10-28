@@ -120,7 +120,9 @@ class TurnMixin:
         self._spin("思考中…")  # type: ignore[attr-defined]
         worker = threading.Thread(target=work, name="heng-turn", daemon=True)
         worker.start()
-        draft = ""
+        # 后台子智能体做完把空闲的输入框叫醒时，框里敲了一半的字记在 _prefill：接着放回输入框。以前从空的开始、
+        # 这一问结束时又用空的盖掉 _prefill，敲了一半的字就丢了
+        draft, self._prefill = getattr(self, "_prefill", ""), ""  # type: ignore[has-type]
         try:
             while True:
                 result = box.prompt(default=draft)
