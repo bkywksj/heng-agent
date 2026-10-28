@@ -61,6 +61,7 @@ from heng_agent.tools.subagent import SubAgentTool
 from heng_agent.tools.todo import render as render_todos
 from heng_agent.ui import agents_view, info, mcp_view, terminal_setup
 from heng_agent.ui.config_cmd import ConfigCommand
+from heng_agent.ui.doctor import report as doctor_report
 from heng_agent.ui.doctor import run_checks
 from heng_agent.ui.inputbox import InputBox
 from heng_agent.ui.keywatch import EscWatcher
@@ -91,7 +92,7 @@ HELP = """查看状态
   /hooks                      生效的钩子（heng 的与 Claude Code 的）
   /skills · /agents · /tasks · /todo   技能 · 子智能体角色（new 名字 新建）· 后台任务（kill 任务号）· 任务清单
   /diff                       这次会话改过的文件（和第一次改之前比）
-  /doctor                     检查配置、服务商连接、终端、git 等运行环境
+  /doctor [copy]              检查配置、服务商连接、终端、git 等；copy 连同最近的日志复制下来（反馈问题用）
 
 会话
   /clear                      开始新会话          /resume [关键词]   选一个旧会话接着聊
@@ -476,6 +477,8 @@ class Repl:
             return []
         if cmd == "agents" and not prior:
             return [("new", "建一个角色：new 名字", True)]
+        if cmd == "doctor" and not prior:
+            return [("copy", "检查后把结果连同最近的日志复制下来，反馈问题时贴上", False)]
         if cmd == "think" and not prior:
             return [("on", "打开思考模式", False), ("off", "关闭", False), ("show", "看最近一次思考", False),
                     ("16000", "把思考预算设为 16000 token 并打开", False)]  # fmt: skip
@@ -1130,8 +1133,11 @@ class Repl:
         elif cmd == "/doctor":
             icons = {"ok": "[green]✓[/]", "warn": "[yellow]![/]", "fail": "[red]✗[/]"}
             c.print("[dim]正在检查（会连一次服务商）……[/]")
-            for status, name, note in run_checks(self):
+            checks = run_checks(self)
+            for status, name, note in checks:
                 c.print(f"  {icons[status]} [bold]{name:<6}[/] {escape(note)}")
+            if rest == "copy":  # 反馈问题时用：检查结果 + 最近的日志，一次复制走
+                self.copy_diagnosis(checks)
         elif cmd == "/rewind":
             self.rewind()
         elif cmd == "/undo":
@@ -1333,6 +1339,20 @@ class Repl:
         entry = next(e for e in manager.status if e[0] == name)
         self._set_mcp_status(*entry)
         self.print_mcp_status([entry])
+
+    def copy_diagnosis(self, checks: list[tuple[str, str, str]]) -> None:
+        """/doctor copy：诊断报告放进剪贴板；剪贴板用不了就存成文件，告诉用户在哪。"""
+        home = self.agent.settings.home
+        text = doctor_report(checks, home)  # type: ignore[arg-type]
+        ok, note = copy_text(text)
+        if ok:
+            self.console.print(f"[green]✓ 已复制诊断信息[/]（{len(text.splitlines())} 行，含最近的日志；"
+                               "用户目录已换成 ~），可以直接粘贴到反馈里")  # fmt: skip
+            return
+        path = home / "logs" / f"doctor-{time.strftime('%Y%m%d-%H%M%S')}.txt"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        self.console.print(f"[yellow]没能复制（{escape(note)}）[/]，诊断信息存到了 {file_link(str(path), home)}")
 
     def _sync_mcp(self) -> None:
         """后台连接的 MCP 服务：连完后把工具接进智能体、打印连接结果。只在主线程、用户提交输入时调。

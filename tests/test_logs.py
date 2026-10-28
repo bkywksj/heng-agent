@@ -93,3 +93,64 @@ def test_repl_survives_unexpected_error(tmp_path: Path, monkeypatch: pytest.Monk
     assert "内部错误：RuntimeError: 坏了" in flat and "heng-agent.log" in flat
     assert "好的" in shown  # 第二问照常回答
     assert "Traceback" in "\n".join(logs.tail(tmp_path / "h"))
+
+
+# ---------- /doctor copy：反馈问题时，检查结果连同最近的日志一次复制走 ----------
+
+CHECKS = [("ok", "配置文件", "无误"), ("fail", "服务商连接", "连不上 https://api.example.com")]
+
+
+def test_doctor_report_has_checks_and_logs_without_user_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from heng_agent.ui.doctor import report
+
+    fake_home = tmp_path / "Users" / "zhangsan"
+    monkeypatch.setattr(Path, "home", lambda: fake_home)
+    data = fake_home / ".heng-agent"
+    logs.setup(data)
+    logs.log.warning("这一问出错：连不上 %s", fake_home / "proj")
+    text = report(CHECKS, data)  # type: ignore[arg-type]
+    assert "✓ 配置文件：无误" in text and "✗ 服务商连接：连不上 https://api.example.com" in text
+    assert "这一问出错" in text and "heng-agent " in text and "Python" in text
+    assert "zhangsan" not in text and "~" in text  # 用户目录换成 ~，反馈里不带出本机用户名
+
+
+def _doctor_repl(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Repl, Console]:
+    from heng_agent.ui import repl as repl_module
+
+    monkeypatch.setattr(repl_module, "run_checks", lambda repl: CHECKS)  # 不真去连服务商
+    work = tmp_path / "w"
+    work.mkdir()
+    console = Console(record=True, width=160, force_terminal=False)
+    return Repl(Agent(Settings(workdir=work, home=tmp_path / "h"), FakeModel([])), console=console), console
+
+
+def test_doctor_copy_puts_report_on_clipboard(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from heng_agent.ui import repl as repl_module
+
+    copied: list[str] = []
+    monkeypatch.setattr(repl_module, "copy_text", lambda text: (copied.append(text), (True, ""))[1])
+    repl, console = _doctor_repl(tmp_path, monkeypatch)
+    repl.handle_command("/doctor copy")
+    assert copied and "服务商连接" in copied[0] and "## 最近的日志" in copied[0]
+    assert "已复制诊断信息" in console.export_text()
+
+
+def test_doctor_copy_falls_back_to_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """剪贴板用不了（Linux 上没装 xclip 之类）：存成文件，告诉用户在哪。"""
+    from heng_agent.ui import repl as repl_module
+
+    monkeypatch.setattr(repl_module, "copy_text", lambda text: (False, "找不到剪贴板工具"))
+    repl, console = _doctor_repl(tmp_path, monkeypatch)
+    repl.handle_command("/doctor copy")
+    saved = list((tmp_path / "h" / "logs").glob("doctor-*.txt"))
+    assert len(saved) == 1 and "服务商连接" in saved[0].read_text(encoding="utf-8")
+    shown = console.export_text().replace("\n", "")
+    assert "没能复制（找不到剪贴板工具）" in shown and "doctor-" in shown
+
+
+def test_plain_doctor_does_not_copy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from heng_agent.ui import repl as repl_module
+
+    monkeypatch.setattr(repl_module, "copy_text", lambda text: pytest.fail("不带 copy 不该复制"))
+    repl, _ = _doctor_repl(tmp_path, monkeypatch)
+    repl.handle_command("/doctor")

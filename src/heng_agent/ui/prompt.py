@@ -35,7 +35,7 @@ BUILTIN_HELP = {
     "copy": "复制上一条回复",
     "export": "把会话导出成 Markdown",
     "memory": "读进来的说明文件（优先级、各占多少），edit 修改",
-    "doctor": "检查运行环境",
+    "doctor": "检查运行环境（copy：连同日志复制下来，反馈问题用）",
     "todo": "查看任务清单",
     "skills": "查看技能",
     "mcp": "MCP 服务与工具（可带服务名）",

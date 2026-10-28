@@ -6,14 +6,17 @@
 from __future__ import annotations
 
 import os
+import platform
 import shutil
 import subprocess
 import sys
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 from heng_agent import configfile
 from heng_agent.context import MEMORY_WARN_TOKENS, estimate_tokens, load_memories, memory_files
+from heng_agent.core import logs
 from heng_agent.core.errors import AgentError
 from heng_agent.core.net import describe_proxy
 from heng_agent.core.version import version_label
@@ -131,3 +134,26 @@ def run_checks(repl: Repl) -> list[Check]:
         note = "能换行" if on else "换行补丁没打上（先用 Ctrl+J 换行；/terminal-setup 可让终端代劳）"
         checks.append(("ok" if on else "warn", "Shift+Enter", note))
     return checks
+
+
+MARKS = {"ok": "✓", "warn": "!", "fail": "✗"}
+
+
+def report(checks: list[Check], home: Path, *, log_lines: int = 60) -> str:
+    """/doctor copy 的诊断报告（纯文字，直接贴进反馈）：版本与系统、每项检查、最近的日志。
+
+    用户目录换成 ~：反馈会贴到公开的地方，不带出本机用户名。密钥本来就不在检查结果和日志里。
+    """
+    lines = [
+        f"heng-agent {version_label()} · Python {platform.python_version()} · {platform.platform()}",
+        f"生成于 {time.strftime('%Y-%m-%d %H:%M:%S')}",
+        "",
+        "## 检查",
+        *(f"{MARKS[status]} {name}：{note}" for status, name, note in checks),
+        "",
+        f"## 最近的日志（{logs.log_path(home)}）",
+        *(logs.tail(home, log_lines) or ["（还没有日志）"]),
+    ]
+    text = "\n".join(lines)
+    user_home = str(Path.home())
+    return text.replace(user_home, "~").replace(user_home.replace("\\", "/"), "~")
