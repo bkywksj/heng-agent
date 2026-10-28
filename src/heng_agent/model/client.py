@@ -16,6 +16,7 @@ from typing import Any, Protocol
 
 import httpx
 
+from heng_agent.core import logs
 from heng_agent.core.errors import ModelError
 from heng_agent.core.net import http_client
 from heng_agent.core.types import Message, ModelEvent, TextDelta, ThinkingBlock, ThinkingDelta, ToolCall, TurnEnd
@@ -300,6 +301,7 @@ class _HttpClient:
                     raise
                 wait = exc.retry_after if exc.retry_after is not None else float(2**n)
                 wait = min(wait, 60.0)
+                logs.log.warning("模型请求出错，%g 秒后重试（第 %d/%d 次）：%s", wait, n + 1, MAX_RETRIES, exc)
                 if self.on_retry is not None:
                     self.on_retry(f"{exc}；{wait:g} 秒后重试（第 {n + 1}/{MAX_RETRIES} 次）")
                 self.sleep(wait)

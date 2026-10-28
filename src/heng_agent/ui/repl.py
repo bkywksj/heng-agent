@@ -40,6 +40,7 @@ from heng_agent.context import (
     memory_files,
     mention_images,
 )
+from heng_agent.core import logs
 from heng_agent.core.compat import PROJECT_MEMORY_NAMES, claude_home
 from heng_agent.core.errors import AgentError
 from heng_agent.core.types import AgentEvent, Notice, TextDelta, ThinkingDelta, ToolFinished, ToolStarted, TurnDone
@@ -1633,7 +1634,17 @@ class Repl:
             except AgentError as exc:
                 self._end_text()
                 self._unspin()
+                logs.log.warning("这一问出错：%s", exc)
                 self.console.print(f"\n[red]{escape(str(exc))}[/]")
+            except Exception as exc:
+                # 意料之外的错误（程序的 bug）：以前整个程序崩掉、对话也没了。现在记下调用栈，这一问作废，会话照常
+                self._end_text()
+                self._unspin()
+                logs.log.exception("这一问遇到意料之外的错误")
+                where = f"，出错位置记在日志里：{logs.current()}" if logs.current() else ""
+                hint = f"{where}。可以接着说下一步；反馈问题时运行 /doctor copy"
+                self.console.print(f"\n[red]内部错误：{escape(type(exc).__name__)}: {escape(str(exc))}[/]"
+                                   f"[dim]{escape(hint)}[/]")  # fmt: skip
             finally:
                 if self._watcher is not None:
                     self._watcher.stop()

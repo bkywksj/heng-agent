@@ -33,6 +33,7 @@ from typing import Any
 import httpx
 
 from heng_agent import __version__
+from heng_agent.core import logs
 from heng_agent.core import trust as trust_store
 from heng_agent.core.errors import AgentError
 from heng_agent.core.net import http_client
@@ -456,6 +457,7 @@ class MCPManager:
     ) -> list[MCPTool]:
         """把一次连接的结果记进工具列表与状态（同一时刻只有一个线程在调：构造时的连接线程，或之后主线程的重连）。"""
         if isinstance(result, AgentError):
+            logs.log.warning("MCP 服务 %s 连接失败：%s", config.name, result)
             self.errors.append(str(result))
             self._set_status(config.name, False, str(result))
             return []

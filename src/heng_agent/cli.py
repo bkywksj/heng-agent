@@ -6,8 +6,10 @@ import argparse
 import contextlib
 import json
 import os
+import platform
 import shutil
 import sys
+import traceback
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -17,6 +19,7 @@ from heng_agent.agent import Agent
 from heng_agent.attachments import absorb_paths
 from heng_agent.commands import discover_commands, expand_command, shell_runner
 from heng_agent.context import expand_mentions, mention_images
+from heng_agent.core import logs
 from heng_agent.core.config import Settings
 from heng_agent.core.errors import AgentError
 from heng_agent.core.types import AgentEvent, Notice, TextDelta, ToolFinished, ToolStarted
@@ -297,6 +300,22 @@ def run_print_mode(agent: Agent, prompt: str, output_format: str = "text") -> in
 
 
 def main(argv: list[str] | None = None) -> int:
+    """入口：意料之外的异常在这里兜底——记进日志（带调用栈），给用户一句话和日志位置，不甩一屏堆栈。"""
+    try:
+        return _main(argv)
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except Exception as exc:
+        logs.log.exception("意料之外的错误")
+        path = logs.current()
+        if is_dev():  # 开发版照样打出调用栈，改代码时直接看
+            traceback.print_exc()
+        where = f"出错位置记在日志里：{path}（反馈问题时请附上，或在 heng-agent 里运行 /doctor copy）" if path else ""
+        print(f"出错了：{type(exc).__name__}: {exc}\n{where}".rstrip(), file=sys.stderr)
+        return 1
+
+
+def _main(argv: list[str] | None = None) -> int:
     _utf8_console()
     _enable_vt()  # 必须在建 rich Console 之前：否则 rich 按老式控制台渲染（16 色、无超链接）
     # 必须在任何提示、选择器之前：prompt_toolkit 的输入读取器建一次就缓存，晚了 Shift+Enter 就分不出来了
@@ -325,6 +344,12 @@ def main(argv: list[str] | None = None) -> int:
     except (AgentError, ValueError) as exc:
         print(f"错误：{exc}", file=sys.stderr)
         return 1
+    note = logs.setup(settings.home)
+    if note:
+        print(f"⋯ {note}", file=sys.stderr)
+    mode = "脚本模式（-p）" if args.prompt is not None else "交互模式"
+    logs.log.info("启动 %s · %s · Python %s · %s · 目录 %s", version_label(), mode, platform.python_version(),
+                  platform.platform(), settings.workdir)  # fmt: skip
     try:
         if args.list_providers:
             return list_providers(settings)

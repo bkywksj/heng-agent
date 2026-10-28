@@ -34,3 +34,14 @@ def real_builtin_skills(monkeypatch: pytest.MonkeyPatch) -> Path:
     real = Path(skill.__file__).resolve().parent.parent / "skills"
     monkeypatch.setattr(skill, "BUILTIN_SKILLS", real)
     return real
+
+
+@pytest.fixture(autouse=True)
+def _close_log_file() -> Iterator[None]:
+    """每个测试结束关掉日志文件：调过 cli.main 的测试会把日志写进它的临时目录，句柄留着 Windows 上目录删不掉。"""
+    yield
+    from heng_agent.core import logs
+
+    for handler in list(logs.log.handlers):
+        logs.log.removeHandler(handler)
+        handler.close()
