@@ -232,3 +232,17 @@ def test_connect_timeout_is_retried(error: type[Exception]) -> None:
     events = list(client.stream("", [], []))
     assert isinstance(events[-1], TurnEnd) and len(calls) == 2 and slept == [1.0]
     assert "连模型服务超时" in notes[0]
+
+
+def test_error_message_keeps_only_the_human_part() -> None:
+    """服务报错只取 message：以前整段 JSON 原样显示，一次重试占两行。"""
+    from heng_agent.model.client import error_message
+
+    body = '{"error":{"message":"No available accounts: no available accounts","type":"api_error"},"type":"error"}'
+    assert error_message(body) == "No available accounts: no available accounts"
+    assert error_message('{"message": "余额不足"}') == "余额不足"
+    assert error_message('{"error": "bad key"}') == "bad key"
+    assert error_message("<html>502 Bad Gateway</html>") == "<html>502 Bad Gateway</html>"
+    client = make_client(_profile("anthropic"), 100, httpx.MockTransport(lambda r: httpx.Response(401, text=body)))
+    with pytest.raises(ModelError, match=r"^模型服务返回 401：No available accounts: no available accounts$"):
+        list(client.stream("", [], []))

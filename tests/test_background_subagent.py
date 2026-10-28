@@ -217,3 +217,69 @@ def test_background_subagent_gets_its_own_client(tmp_path: Path) -> None:
     foreground, _ = agent._spawn_subagent(None)
     assert background.client is not agent.client and background.client.profile == profile
     assert foreground.client is agent.client  # 前台的照旧共用（ESC 本来就该一起停）
+
+
+def test_retry_updates_the_spinner_instead_of_printing_lines(tmp_path: Path) -> None:
+    """重试时在转圈那行原地更新「原因 · 第 n/4 次重试」，不再每次另起一行（四次重试刷满一屏，用户反馈）。"""
+    repl, console = _repl(tmp_path, FakeModel([]))
+    shown: list[tuple[str, str]] = []
+    repl._spin = lambda text, hint="", **kw: shown.append((text, hint))  # type: ignore[method-assign]
+    for n in (1, 2):
+        repl._on_retry(f"模型服务返回 503：No available accounts；{2 ** (n - 1)} 秒后重试（第 {n}/4 次）")
+    assert shown[-1] == ("等模型服务…", "503：No available accounts · 第 2/4 次重试 · ESC 中断")
+    assert "重试" not in console.export_text()
+
+
+def test_panel_hint_names_the_keys(tmp_path: Path) -> None:
+    """面板第一行写明按什么键：以前只有灰色的「↓ 选中查看」，用户没注意到能切过去看。"""
+    from prompt_toolkit.history import InMemoryHistory
+    from prompt_toolkit.output import DummyOutput
+
+    from heng_agent.ui.inputbox import InputBox
+    from heng_agent.ui.prompt import MODES, STYLE, SlashCompleter
+
+    box = InputBox(history=InMemoryHistory(), commands=SlashCompleter(lambda: {}), workdir=tmp_path,
+                   toolbar=lambda: "", get_mode=lambda: "ask", set_mode=lambda m: None, modes=MODES, style=STYLE,
+                   output=DummyOutput(), agents=lambda: [(1, "general  读版本号")])  # fmt: skip
+    from prompt_toolkit.buffer import Buffer
+
+    root, _ = box.build_layout(Buffer())
+    text = "".join(t for _, t, *_ in _panel_fragments(root))
+    assert "按 ↓ 选中子智能体，Enter 看它在做什么" in text and "○ general  读版本号" in text
+    defined = {name for name, _ in STYLE.style_rules}
+    assert {"agents.key", "agents.hint", "agents.main", "agents.pick"} <= defined  # 以前根本没定义颜色
+
+
+def _panel_fragments(root: Any) -> list[Any]:
+    """在布局里找到子智能体面板那块，取它当前显示的内容。"""
+    from prompt_toolkit.layout import walk
+    from prompt_toolkit.layout.containers import Window
+    from prompt_toolkit.layout.controls import FormattedTextControl
+
+    for container in walk(root):
+        if isinstance(container, Window) and isinstance(container.content, FormattedTextControl):
+            fragments = container.content.text() if callable(container.content.text) else container.content.text
+            if isinstance(fragments, list) and any("● main" in str(f[1]) for f in fragments):
+                return fragments
+    return []
+
+
+def test_draft_survives_the_turn_started_by_a_notice(tmp_path: Path) -> None:
+    """后台子智能体做完叫醒输入框时框里敲了一半的字：自动发起的那一问里接着显示，这一问结束后也还在。
+    以前那一问从空的输入框开始、结束时又用空的盖掉，敲了一半的字就丢了。"""
+    from prompt_toolkit.history import InMemoryHistory
+    from prompt_toolkit.input import create_pipe_input
+    from prompt_toolkit.output import DummyOutput
+
+    from heng_agent.ui.inputbox import InputBox
+    from heng_agent.ui.prompt import MODES, STYLE, SlashCompleter
+    from test_live_turn import SlowModel
+
+    with create_pipe_input() as pipe:
+        repl, _ = _repl(tmp_path, SlowModel([["收到"]], delay=0.3))
+        repl._box = InputBox(history=InMemoryHistory(), commands=SlashCompleter(lambda: {}), workdir=tmp_path,
+                             toolbar=lambda: "", get_mode=lambda: "ask", set_mode=lambda m: None, modes=MODES,
+                             style=STYLE, input=pipe, output=DummyOutput())  # fmt: skip
+        repl._prefill = "敲了一半"  # 主循环收到叫醒信号时把框里的字记在这里
+        repl._run_turn_live(f"{NOTICE_PREFIX}#1「x」做完了。结论：\n\n好", None)
+    assert repl._prefill == "敲了一半"

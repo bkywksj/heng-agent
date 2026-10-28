@@ -140,6 +140,7 @@ HELP = """查看状态
 输入技巧
   @路径 附上文件；拖入文件、Alt+V 粘贴图片或文件；!命令 自己直接跑命令；Shift+Enter（或 Ctrl+J）换行
   Ctrl+C / ESC 清空输入框，任务运行时按 ESC 中断；Ctrl+L 清屏；Ctrl+B 把跑着的命令转到后台
+  有子智能体在跑时：输入框最后一行按 ↓ 选中它，Enter 看它在做什么，ESC 回到输入框
   空输入框里连按两次 Ctrl+C 退出"""
 
 
@@ -214,7 +215,21 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin, Tu
     def _hook_retry(self) -> None:
         """模型客户端重试时在界面上说一声（切换服务商后要重新挂）。"""
         if hasattr(self.agent.client, "on_retry"):
-            self.agent.client.on_retry = lambda msg: self.on_event(Notice(msg))  # type: ignore[attr-defined]
+            self.agent.client.on_retry = self._on_retry  # type: ignore[attr-defined]
+
+    def _on_retry(self, message: str) -> None:
+        """模型请求出错、等着重试：在转圈那行原地显示「等模型服务…（12s）· 原因 · 第 2/4 次重试」。
+
+        以前每次重试另起一行黄字（还带着整段 JSON），四次重试刷满一屏（用户反馈）。日志里照旧每次都记。"""
+        reason, _, plan = message.rpartition("；")
+        reason = reason or message
+        reason = reason.removeprefix("模型服务返回 ")
+        if len(reason) > 60:
+            reason = reason[:58] + "…"
+        attempt = plan[plan.find("第") :].rstrip("）") if "第" in plan else ""
+        self._spin(
+            "等模型服务…", hint=" · ".join(p for p in (reason, f"{attempt}重试" if attempt else "", "ESC 中断") if p)
+        )
 
     def _gap(self) -> None:
         """开始一个新的块（提问、思考摘要、一段回复、一次工具调用、过程提示、结尾那行……）之前调：

@@ -484,8 +484,16 @@ class InputBox:
                 self.agent_pick = None  # 都做完了：退出选择
                 return []
             pick = self.agent_pick
-            hint = "  ↑↓ 选择 · Enter 查看 · ESC 返回" if pick is not None else "  ↓ 选中查看"
-            out: list[tuple[str, str]] = [("", "\n"), ("class:agents.main", " ● main"), ("class:agents.hint", hint)]
+            # 提示要看得见：以前只有灰色的「↓ 选中查看」，用户没注意到能切过去看（反馈「没有提示到快捷键」）
+            if pick is None:
+                hint = [("class:agents.hint", "   按 "), ("class:agents.key", "↓"),
+                        ("class:agents.hint", " 选中子智能体，"), ("class:agents.key", "Enter"),
+                        ("class:agents.hint", " 看它在做什么")]  # fmt: skip
+            else:
+                hint = [("class:agents.hint", "   "), ("class:agents.key", "↑↓"), ("class:agents.hint", " 选择 · "),
+                        ("class:agents.key", "Enter"), ("class:agents.hint", " 查看 · "),
+                        ("class:agents.key", "ESC"), ("class:agents.hint", " 回到输入框")]  # fmt: skip
+            out: list[tuple[str, str]] = [("", "\n"), ("class:agents.main", " ● main"), *hint]
             for i, (_, line) in enumerate(rows):
                 style = "class:agents.pick" if pick is not None and i == min(pick, len(rows) - 1) else "class:agents"
                 out += [("", "\n"), (style, f" {'❯' if style.endswith('pick') else '○'} {line}")]

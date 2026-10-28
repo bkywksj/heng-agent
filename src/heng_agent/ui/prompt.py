@@ -66,6 +66,12 @@ STYLE = Style.from_dict(
         "flash": "#98c379",
         "todos": "#7f848e",
         "queued": "#7f848e",  # 回答中排着队的消息：灰色，和 Claude Code 一样
+        # 子智能体面板（状态栏下面）：main 加粗，快捷键用强调色，选中那行高亮
+        "agents.main": "bold #abb2bf",
+        "agents.hint": "#7f848e",
+        "agents.key": "bold #61afef",
+        "agents": "#abb2bf",
+        "agents.pick": "bold #61afef",
         "bar.mode": "#7f848e",  # 手动确认是平常状态：灰色、不抢眼
         "bar.mode-edits": "bold #e5c07b",
         "bar.mode-auto": "bold #e06c75",

@@ -212,6 +212,24 @@ RETRY_STATUS = frozenset({408, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524,
 MAX_RETRIES = 4
 
 
+def error_message(body: str) -> str:
+    """服务报错的正文里取出给人看的那句：{"error": {"message": …}} / {"message": …}；不是 JSON 就截一段原文。
+
+    以前整段 JSON 原样显示（{"error":{"message":"No available accounts…","type":"api_error"},"type":"error"}），
+    一次重试占两行，四次重试刷满一屏（用户反馈）。"""
+    try:
+        data = json.loads(body)
+    except ValueError:
+        return body.strip()[:300]
+    if isinstance(data, dict):
+        error = data.get("error")
+        message = error.get("message") if isinstance(error, dict) else error if isinstance(error, str) else None
+        message = message or data.get("message") or data.get("msg")
+        if isinstance(message, str) and message.strip():
+            return message.strip()[:300]
+    return body.strip()[:300]
+
+
 def _retry_after(resp: httpx.Response) -> float | None:
     try:
         return float(resp.headers["retry-after"])
@@ -266,7 +284,7 @@ class _HttpClient:
                 if self._cancelled.is_set():
                     raise KeyboardInterrupt
                 if resp.status_code >= 400:
-                    detail = resp.read().decode("utf-8", errors="replace")[:500]
+                    detail = error_message(resp.read().decode("utf-8", errors="replace"))
                     raise ModelError(
                         f"模型服务返回 {resp.status_code}：{detail}",
                         retryable=resp.status_code in RETRY_STATUS,
