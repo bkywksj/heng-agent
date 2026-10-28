@@ -219,3 +219,12 @@ def test_project_name_with_either_separator(workdir: str) -> None:
     """项目名两种分隔符都认：以前用 Path(...).name，Linux 上不认反斜杠，Windows 写法的路径整串被当成名字（CI 撞到）。"""
     info = _lines(toolbar("ask", "m", workdir, 0, 1))[0]
     assert info.startswith(" ▣ heng-agent ")
+
+
+@pytest.mark.parametrize(("speed", "style"), [(8.0, "class:bar.speed-slow"), (14.9, "class:bar.speed-slow"),
+                                               (15.0, "class:bar.dim"), (120.0, "class:bar.dim")])  # fmt: skip
+def test_slow_speed_is_orange(speed: float, style: str) -> None:
+    """只标「慢」（低于 15 t/s 橙色，多半是中转站拥堵或限流）；正常和快的都是灰色，不按统一标准分快慢。"""
+    bar = toolbar("ask", "m", "/w", 1000, 200_000, width=200, speed=speed)
+    shown = [s for s, text in bar if text.endswith("t/s")]
+    assert shown == [style]

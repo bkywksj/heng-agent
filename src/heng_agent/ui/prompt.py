@@ -83,6 +83,7 @@ STYLE = Style.from_dict(
         "bar.thinking": "bold #c678dd",
         "bar.mcp": "#98c379",
         "bar.mcp-wait": "#d19a66",
+        "bar.speed-slow": "#d19a66",
         "bar.mcp-fail": "bold #e06c75",
         # 补全菜单：深色底、选中项用强调色整行高亮、说明文字灰色，滚动条与底色协调
         "completion-menu": "bg:#21252b",
@@ -170,6 +171,10 @@ CTX_CELLS = 8  # 上下文进度条的格数
 SEP = ("class:bar.sep", " | ")
 
 
+#: 输出速度低于这个（token / 秒）时状态栏里标成橙色
+SLOW_SPEED = 15
+
+
 def context_bar(used: int, window: int, threshold: float) -> tuple[str, str]:
     """(样式, 进度条)：一半以下绿，过半黄，离自动压缩不到 10% 红。"""
     pct = used / window * 100 if window else 0.0
@@ -232,7 +237,10 @@ def info_line(model: str, workdir: str, used: int, window: int, *, thinking: str
         if mcp:  # MCP 连接情况：(样式, 文字)，见 mcp_view.toolbar_part
             parts += [SEP, (mcp[0], mcp[1].strip())]
         if speed and "speed" not in drop:
-            parts += [SEP, ("class:bar.dim", f"{speed:.0f}t/s")]
+            # 只标「慢」：不同模型本来就差很多（大模型 30～50 t/s 正常、小模型上百），按统一标准分快慢会误导；
+            # 明显慢多半是中转站拥堵或限流，值得留意
+            style = "class:bar.speed-slow" if speed < SLOW_SPEED else "class:bar.dim"
+            parts += [SEP, (style, f"{speed:.0f}t/s")]
         ctx = "上下文" if "bar" in drop else f"上下文 {bar}"
         ctx += f" {pct:.0f}%" + ("" if "tokens" in drop else f" {human_tokens(used)}/{human_tokens(window)}")
         parts += [SEP, (ctx_style, ctx)]
