@@ -354,7 +354,9 @@ heng-agent -p "跑测试" --output-format stream-json      # 每个事件一行 
 - 回复按 Markdown 渲染（代码块、列表、表格），边生成边成形。
 - **自动重试**：限流（429）、过载（529）、服务端错误、网络中断时自动重试，最多 4 次，界面上会提示。
 - **自动压缩**：对话快撑满模型上下文（超过 80%）时，把旧历史总结成摘要继续干。上下文长度在配置档里用
-  `context_window` 设（默认 128K，anthropic 200K，ollama 32K）。
+  `context_window` 设；不写就自动定：先向服务商查（Anthropic 官方的模型接口、OpenRouter 的模型列表；中转站一般查不到），
+  查不到按模型名推断（Claude Opus / Sonnet 4.6 起、Haiku 5 起是 1M，更早的 200K），都不认识用 128K（ollama 预设 32K）。
+  `/status` 里写着长度是从哪来的；推断错了用 `/config set profiles.<服务商>.context_window 数字` 改，马上生效。
 
 ## 多开与配置隔离
 
