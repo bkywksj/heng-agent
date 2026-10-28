@@ -167,7 +167,11 @@ heng-agent --provider heng --model heng-mini-0.1
   模型第一次读写那个目录的文件时自动附上，每份只附一次。
 - **内置命令**：`/commit [要求]` 按仓库风格写提交信息并提交（不 push、不改历史）；`/review [关注点]` 审查没提交的改动，
   按严重程度列问题。在 `.heng-agent/commands/` 放同名的 `commit.md` / `review.md` 就能按自己团队的规矩改写。
-- **`/doctor`**：检查配置、服务商连接（会真的连一次）、密钥、终端、git、记忆、钩子、MCP、会话目录。
+- **`/doctor`**：检查配置、服务商连接（会真的连一次）、密钥、代理、终端、git、记忆、钩子、MCP、会话目录。
+  `/doctor copy` 把检查结果连同最近的日志复制下来（用户目录换成 ~），反馈问题时直接贴。
+- **查看状态**：`/status` 一屏看全版本、模型、会话、权限、MCP、说明文件；`/usage`（`/cost`）本会话的用量与花费、
+  缓存命中率；`/stats` 今天 / 近 7 天 / 近 30 天的统计，按项目、按模型排名；`/context` 上下文被什么占着；
+  `/hooks` 生效的钩子。
 - **后台任务**：开发服务器、watch 这类不会自己结束的命令，模型会用 `run_in_background` 放到后台跑，之后用 `bash_output`
   看新输出、`kill_task` 停掉。前台命令跑着时按 **Ctrl+B** 也能把它转到后台（进程不停、已有输出不丢）。
   `/tasks` 查看、`/tasks kill bg1` 停止；状态栏会显示「后台 N」；退出 heng-agent（含 `-p` 结束）时停掉全部后台任务。
@@ -426,6 +430,22 @@ Claude、GPT 等支持；DeepSeek 等纯文本模型不支持。
 
 在项目根目录放一个 `HENG.md`，写上项目规矩（技术栈、命名约定、提交规范……），每次启动自动读入。
 所有项目通用的写在 `~/.heng-agent/HENG.md`。
+
+## 故障排查
+
+先在 heng-agent 里运行 `/doctor`，一项项看是哪一环出了问题；要反馈问题就运行 `/doctor copy`，把复制下来的内容贴上。
+运行日志在数据目录的 `logs/heng-agent.log`（正式版 `~/.heng-agent/logs/`，开发版 `~/.heng-agent-dev/logs/`）。
+
+| 现象 | 原因与处理 |
+|---|---|
+| 敲 `heng-agent` 提示找不到命令 | 安装时改了 PATH，要**重开一个终端**才生效；还不行就运行 `uv tool update-shell` 再重开 |
+| 一启动就报 `ModuleNotFoundError: heng_agent` | 多半是 Windows 上 heng-agent 开着时升级 / 重装：文件被占用，装到一半失败。关掉所有 heng-agent 窗口，重新运行一键安装命令 |
+| `heng-agent upgrade` 说已是最新，但刚发了新版本 | uv 缓存了旧的版本列表（0.3.2 起升级时会刷新）。旧版本手动运行 `uv tool install --force --upgrade --refresh-package heng-agent heng-agent` |
+| 连不上服务商 | 看 `/doctor` 的「服务商连接」与「代理」两行：地址、密钥、请求实际走的代理。要单独指定或不走代理，见上文「代理」 |
+| 中转站报 401 | 配置档里试试改 `auth`：`bearer` 或 `x-api-key` |
+| Shift+Enter 不能换行 | Windows Terminal 里运行 `/terminal-setup`；任何终端里 Ctrl+J、Alt+Enter 都能换行 |
+| 配了 MCP 服务，有的连不上 | 欢迎页与 `/mcp` 会列出原因；改好后 `/mcp reconnect 服务名`，不用重启 |
+| 出现「内部错误」 | 程序的 bug：这一问作废、会话照常。运行 `/doctor copy` 反馈给我们 |
 
 ## 开发
 
