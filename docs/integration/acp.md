@@ -6,6 +6,37 @@
 
 只想在终端里用 heng-agent 的，不需要这份文档：终端标签页里直接运行 `heng-agent` 即可（服务商同样可以用下面的环境变量给）。
 
+## 0. 安装与升级（客户端按需安装）
+
+客户端不必内置 heng-agent（自带 Python 运行环境的包有几十 MB）：用户第一次选用时再装，之后按需升级。
+
+**检测**：运行 `heng-agent --version`，输出形如 `heng-agent 0.3.0`。运行不了、或版本低于 **0.3.0**（之前的版本没有 ACP 模式）就需要安装或升级。
+找不到命令时先试完整路径（见下面「程序在哪」）：刚装好时 PATH 在客户端这个进程里多半还没生效。
+
+**安装**：在后台运行一键安装脚本，把输出显示给用户（会自动装 uv；pypi.org 连不上自动改用清华镜像；失败会说明原因）。
+
+```powershell
+# Windows
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://gitee.com/bkywksj/heng-agent/raw/master/install.ps1 | iex"
+```
+
+```bash
+# macOS / Linux
+curl -LsSf https://gitee.com/bkywksj/heng-agent/raw/master/install.sh | sh
+```
+
+退出码 0 即装好。脚本会把命令目录加进用户的 PATH（对之后新开的程序生效）；不想改 PATH 就设环境变量 `HENG_AGENT_NO_MODIFY_PATH=1`。
+
+**程序在哪**：`uv tool dir --bin` 输出的目录下，Windows 是 `heng-agent.exe`，macOS / Linux 是 `heng-agent`。
+默认是 `%USERPROFILE%\.local\bin\heng-agent.exe`（Windows）、`~/.local/bin/heng-agent`。建议客户端记下完整路径，用完整路径启动。
+
+**升级**：🔴 **先结束客户端自己启动的所有 heng-agent 进程**（按进程号，不要按程序名结束——用户可能还在终端里开着别的
+heng-agent），再重新运行一键安装脚本（它会升级到最新版）。Windows 上程序运行时文件被占用，这时硬升级会装到一半失败，
+还会把已有的安装弄坏。脚本发现还有 heng-agent 在运行时会拒绝安装并列出进程号（退出码 1），把这段输出显示给用户即可。
+
+是否有新版本：带请求头 `Accept: application/vnd.pypi.simple.v1+json` 取 `https://pypi.org/simple/heng-agent/`，返回里的 `versions` 是全部版本号（取不带字母的最大的一个）；国内用 `https://pypi.tuna.tsinghua.edu.cn/simple/heng-agent/`。
+⚠ 别用清华镜像的 `/pypi/heng-agent/json`：它的数据是旧的（实测 pip 官方 26.2.2、它给 24.2），查到的永远是老版本。
+
 ## 1. 启动
 
 ```
