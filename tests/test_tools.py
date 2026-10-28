@@ -168,3 +168,55 @@ def test_links_inside_workdir_still_work(tmp_path: Path) -> None:
     (ctx.workdir / "src" / "a.py").write_text("needle = 1\n", encoding="utf-8")
     _link_dir(ctx.workdir / "alias", ctx.workdir / "src")
     assert "needle" in Grep().run({"pattern": "needle"}, ctx).content
+
+
+# ---------- Windows 上找 bash：别用 System32 里的 WSL 启动器 ----------
+
+win_only = pytest.mark.skipif(sys.platform != "win32", reason="只有 Windows 上有 WSL 启动器与 Git Bash 之分")
+
+
+def _fake_exe(path: Path) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"")
+    return path
+
+
+@pytest.fixture
+def fake_windows(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """假的 Windows 目录：System32 里有 WSL 的 bash.exe；PATH 只有它（从 PowerShell / cmd 启动时常见）。"""
+    windows = tmp_path / "Windows"
+    _fake_exe(windows / "System32" / "bash.exe")
+    monkeypatch.setenv("SYSTEMROOT", str(windows))
+    monkeypatch.setenv("PATH", str(windows / "System32"))
+    for name in ("ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"):
+        monkeypatch.setenv(name, str(tmp_path / "none"))
+    return tmp_path
+
+
+@win_only
+def test_wsl_bash_is_skipped_for_git_bash_on_path(fake_windows: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """以前直接用 PATH 里第一个 bash：从 PowerShell 启动时是 System32\bash.exe（WSL 启动器），
+    没装 Linux 发行版就每条命令都报 execvpe(/bin/bash) failed（真实终端里实测撞到）。"""
+    git_bash = _fake_exe(fake_windows / "Git" / "usr" / "bin" / "bash.exe")
+    monkeypatch.setenv("PATH", f"{fake_windows / 'Windows' / 'System32'};{git_bash.parent}")
+    from heng_agent.tools.shell import shell_argv
+
+    assert Path(shell_argv("echo hi")[0]) == git_bash
+
+
+@win_only
+def test_git_bash_found_from_git_exe(fake_windows: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    r"""PATH 里只有 git（Git 安装时默认只把 cmd\git.exe 加进 PATH），从它推出 Git\bin\bash.exe。"""
+    git_exe = _fake_exe(fake_windows / "Git" / "cmd" / "git.exe")
+    bash = _fake_exe(fake_windows / "Git" / "bin" / "bash.exe")
+    monkeypatch.setenv("PATH", f"{fake_windows / 'Windows' / 'System32'};{git_exe.parent}")
+    from heng_agent.tools.shell import shell_argv
+
+    assert Path(shell_argv("echo hi")[0]) == bash
+
+
+@win_only
+def test_no_git_bash_falls_back_to_cmd(fake_windows: Path) -> None:
+    from heng_agent.tools.shell import shell_argv
+
+    assert shell_argv("echo hi") == ["cmd", "/c", "echo hi"]  # 不用 WSL 启动器

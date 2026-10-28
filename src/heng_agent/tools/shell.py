@@ -17,6 +17,7 @@ import subprocess
 import sys
 import threading
 import time
+from pathlib import Path
 from typing import Any
 
 from heng_agent.core.types import ToolResult
@@ -28,13 +29,45 @@ WAIT_SLICE = 0.1  # 等进程时每段多长：越短中断越及时
 IS_WINDOWS = sys.platform == "win32"
 
 
+def _is_wsl_launcher(path: Path) -> bool:
+    """System32 / SysWOW64 里的 bash.exe 是 WSL 的启动器、WindowsApps 里的是商店别名——都不是 Git Bash。"""
+    system_root = Path(os.environ.get("SYSTEMROOT", r"C:\Windows")).resolve()
+    resolved = path.resolve()
+    return resolved.is_relative_to(system_root) or "WindowsApps" in resolved.parts
+
+
+def windows_bash() -> str | None:
+    """Windows 上找 Git Bash：PATH 里的 bash（跳过 WSL 启动器）→ 从 git.exe 的位置推 → 常见安装位置。
+
+    以前直接用 PATH 里第一个 bash：从 PowerShell / cmd 启动时 Git 的 bin 目录多半不在 PATH 里，
+    找到的是 System32\\bash.exe（WSL 启动器）——没装 Linux 发行版就每条命令都报
+    「execvpe(/bin/bash) failed」，装了也是在 Linux 里跑、路径全不对（真实终端里实测撞到）。
+    """
+    for folder in os.environ.get("PATH", "").split(os.pathsep):
+        candidate = Path(folder) / "bash.exe"
+        if folder and candidate.is_file() and not _is_wsl_launcher(candidate):
+            return str(candidate)
+    git = shutil.which("git")
+    if git:  # Git 安装时默认只把 <Git>\cmd 加进 PATH：git.exe 在 cmd\ 或 mingw64\bin\ 下，bash 在 <Git>\bin\
+        for root in Path(git).resolve().parents[:3]:
+            for rel in (Path("bin") / "bash.exe", Path("usr") / "bin" / "bash.exe"):
+                if (root / rel).is_file():
+                    return str(root / rel)
+    for base in ("ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"):
+        root = os.environ.get(base)
+        for sub in (Path("Git"), Path("Programs") / "Git"):
+            candidate = Path(root) / sub / "bin" / "bash.exe" if root else None
+            if candidate is not None and candidate.is_file():
+                return str(candidate)
+    return None
+
+
 def shell_argv(command: str) -> list[str]:
-    bash = shutil.which("bash")
-    if bash:
-        return [bash, "-c", command]
     if IS_WINDOWS:
-        return ["cmd", "/c", command]
-    return ["/bin/sh", "-c", command]
+        bash = windows_bash()
+        return [bash, "-c", command] if bash else ["cmd", "/c", command]
+    bash = shutil.which("bash")
+    return [bash, "-c", command] if bash else ["/bin/sh", "-c", command]
 
 
 def clip(text: str, limit: int = MAX_OUTPUT_CHARS) -> str:
