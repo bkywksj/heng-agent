@@ -29,6 +29,7 @@ from heng_agent.model.providers import PROJECT_CONFIG, Profile, config_path, loa
 from heng_agent.permissions import Permissions, Rules
 from heng_agent.session import SessionStore
 from heng_agent.tools.base import Tool, builtin_tools
+from heng_agent.ui.onboarding import needs_onboarding
 from heng_agent.updates import run_upgrade
 
 
@@ -382,6 +383,10 @@ def main(argv: list[str] | None = None) -> int:
         print("这个目录还没有会话，开始新会话。", file=sys.stderr)
     try:
         if args.prompt is not None:
+            if needs_onboarding(settings.home) and not args.provider:
+                # 脚本模式没法引导：默认连本机的 heng serve，多半连不上——先说清楚该怎么配
+                print("⋯ 还没配置模型服务：先直接运行一次 heng-agent 按引导配好（或用 --provider 指定）。"
+                      "现在先试连本机的 heng serve。", file=sys.stderr)  # fmt: skip
             if (project_hooks and not trusted) or (project_mcp and not mcp_trusted):
                 print(
                     "⋯ 这个项目的钩子 / MCP 服务还没被信任，本次跳过（在交互模式里确认一次即可）。",
@@ -409,6 +414,7 @@ def main(argv: list[str] | None = None) -> int:
             untrusted_mcp=[] if mcp_trusted else project_mcp,
             provider_name=provider_name,
             mcp_status=manager.status,
+            onboarding=needs_onboarding(settings.home) and not args.provider,
         )
         repl.mcp_managers.insert(0, manager)  # /mcp reconnect / disable 要找得到用户配置里的服务
         try:

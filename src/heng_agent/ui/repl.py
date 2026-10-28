@@ -316,12 +316,14 @@ class Repl:
         untrusted_mcp: list[ServerConfig] | None = None,
         provider_name: str = "",
         mcp_status: list[tuple[str, bool, str]] | None = None,
+        onboarding: bool = False,
     ) -> None:
         self.agent = agent
         self.console = console or Console()
         self.untrusted_hooks = untrusted_hooks or []
         self.untrusted_mcp = untrusted_mcp or []
         self.provider_name = provider_name
+        self.onboarding = onboarding  # 第一次运行（还没有用户配置）：欢迎页之后跑新手引导
         self.mcp_status = list(mcp_status or [])  # 用户级 MCP 服务的连接情况（cli 启动），项目级的信任后追加
         self.mcp_managers: list[MCPManager] = []  # 用户级（cli 启动）与信任后启动的项目 MCP 服务；重连、退出时关掉
         self.mcp_disabled: set[str] = set()  # 本会话用 /mcp disable 停用的服务
@@ -1499,6 +1501,10 @@ class Repl:
 
     def loop(self) -> int:
         self.banner()
+        if self.onboarding:
+            from heng_agent.ui import onboarding
+
+            onboarding.run(self)
         if self.untrusted_hooks:
             self.ask_trust()
         if self.untrusted_mcp:
