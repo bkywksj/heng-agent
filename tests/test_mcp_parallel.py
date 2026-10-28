@@ -138,7 +138,7 @@ def test_repl_banner_then_sync_on_first_input(tmp_path: Path, gate: threading.Ev
     banner, after = text.split("个服务正在后台连接", 1)
     assert "后台连接中（3 个）" in banner and "连接失败" not in banner  # 连接中不能当成失败标红
     assert after.count("MCP：2 个服务已连接 · 2 个工具") == 1  # 连完打印一次汇总
-    assert 'MCP 服务 "third" 连接失败：third 起不来' in after
+    assert 'MCP 服务 "third" 连接失败：third 起不来' in after and 'MCP 服务 "first" 已连接' in after
     assert {"mcp__first__first_tool", "mcp__second__second_tool"} <= set(repl.agent.tools)
     manager.close()
 
@@ -239,4 +239,19 @@ def test_toolbar_progress_counts_each_server_as_it_finishes(tmp_path: Path, monk
     gates["third"].set()
     assert manager.wait(5)
     assert shown() == "  ✓ MCP 3"
+    manager.close()
+
+
+def test_ready_servers_are_reported_before_input_without_waiting(tmp_path: Path, gate: threading.Event) -> None:
+    """欢迎页后有确认问题挡着时，答完服务已经连好：输入框出现前就打出结果（带用时）；还没连好就不等。"""
+    manager = MCPManager(_configs(), tmp_path, background=True)
+    repl, console = _repl(tmp_path, manager)
+    repl.banner()
+    repl._sync_mcp(wait=False)  # 还在连：不等、不打印、工具也先不接
+    assert "mcp__first__first_tool" not in repl.agent.tools
+    gate.set()
+    assert manager.wait(5)
+    repl._sync_mcp(wait=False)
+    text = console.export_text()
+    assert "MCP：2 个服务已连接 · 2 个工具，1 个连不上，用时" in text and "mcp__first__first_tool" in repl.agent.tools
     manager.close()

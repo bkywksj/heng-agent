@@ -62,9 +62,9 @@ def test_banner_and_mcp_status(tmp_path: Path) -> None:
     text = console.export_text()
     assert "欢迎使用 heng-agent" in text and str(work) in text and __version__ in text
     assert "yongye" in text and "auto 全部不问" in text and "1 个已连接" in text
-    assert "MCP：1 个服务已连接 · 2 个工具" in text  # 都连上的只一行汇总，不刷屏
+    assert 'MCP 服务 "calc" 已连接 · 2 tools (stdio)' in text  # 每个服务一行（用户要看连了哪些、各几个工具）
+    assert "MCP：1 个服务已连接 · 2 个工具，1 个连不上" in text  # 最后一行汇总
     assert 'MCP 服务 "broken" 连接失败：启动 MCP 服务 broken 失败' in text  # 连不上的单独列、写原因
-    assert "calc" not in text.split("MCP：")[1].splitlines()[0]  # 汇总行里不再逐个列名字
     assert "Shift+Tab" in text  # 提示行
 
 

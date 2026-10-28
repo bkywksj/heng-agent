@@ -126,7 +126,7 @@ def test_reconnect_after_crash(tmp_path: Path) -> None:
         assert new is not old and new.proc.poll() is None  # type: ignore[attr-defined]  # 起了新进程
         fixed = repl.agent.tools["mcp__calc__add"].run({"a": 40, "b": 2}, None)  # type: ignore[arg-type]
         assert fixed.content == "42"  # 智能体里的工具已换成连着新进程的
-        assert 'MCP server "calc" connected' in console.export_text()
+        assert 'MCP 服务 "calc" 已连接' in console.export_text()
     finally:
         manager.close()
 

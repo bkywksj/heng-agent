@@ -124,7 +124,7 @@ class McpMixin:
         self._set_mcp_status(*entry)
         self.print_mcp_status([entry])
 
-    def _sync_mcp(self) -> None:
+    def _sync_mcp(self, wait: bool = True) -> None:
         """后台连接的 MCP 服务：连完后把工具接进智能体、打印连接结果。只在主线程、用户提交输入时调。
 
         不在后台线程里直接改 agent.tools：主线程每轮都在遍历它，同时改会出错。还没连完就等（模型这一轮可能要用），
@@ -137,6 +137,8 @@ class McpMixin:
             return
         shown_connecting = bool(mcp_view.connecting(self))  # 欢迎页显示的是「连接中」，连完要补打印结果
         pending = [name for m in managers for name in m.pending()]
+        if pending and not wait:  # 显示输入框之前顺手接一下：还没连完就不等，交给状态栏显示进度
+            return
         if pending:
             self._spin(f"等待 MCP 服务连接（{len(pending)} 个）…", "Ctrl+C 跳过")
             try:
@@ -166,9 +168,9 @@ class McpMixin:
         self.mcp_status.append((name, ok, detail))
 
     def print_mcp_status(self, entries: list[tuple[str, bool, str]] | None = None) -> None:
-        """每个 MCP 服务一行：MCP server "名字" connected · N tools (stdio / http)；失败的红色写原因。"""
+        """每个 MCP 服务一行：MCP 服务 "名字" 已连接 · N tools (stdio / http)；失败的红色写原因。"""
         for name, ok, detail in entries if entries is not None else self.mcp_status:
             if ok:
-                self.console.print(f'[green]MCP server "{escape(name)}" connected · {escape(detail)}[/]')
+                self.console.print(f'[green]MCP 服务 "{escape(name)}" 已连接 · {escape(detail)}[/]')
             else:
-                self.console.print(f'[red]MCP server "{escape(name)}" failed · {escape(detail)}[/]')
+                self.console.print(f'[red]MCP 服务 "{escape(name)}" 连接失败：{escape(detail)}[/]')

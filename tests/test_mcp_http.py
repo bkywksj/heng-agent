@@ -132,7 +132,7 @@ def test_status_display_format(tmp_path: Path) -> None:
     repl.print_mcp_status([("ai-workstation", True, "3 tools (http)"), ("aicoder", True, "90 tools (stdio)"),
                            ("broken", False, "连不上")])  # fmt: skip
     assert console.export_text().splitlines() == [
-        'MCP server "ai-workstation" connected · 3 tools (http)',
-        'MCP server "aicoder" connected · 90 tools (stdio)',
-        'MCP server "broken" failed · 连不上',
+        'MCP 服务 "ai-workstation" 已连接 · 3 tools (http)',
+        'MCP 服务 "aicoder" 已连接 · 90 tools (stdio)',
+        'MCP 服务 "broken" 连接失败：连不上',
     ]

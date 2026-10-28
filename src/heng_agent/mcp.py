@@ -25,6 +25,7 @@ import queue
 import re
 import subprocess
 import threading
+import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -400,6 +401,8 @@ class MCPManager:
         self._callbacks: list[Callable[[], None]] = []
         #: 已经连完（不论成败）的服务数：结果要全部连完才按顺序登记，状态栏靠它显示「连上了几个」
         self.opened = 0
+        self._started = time.monotonic()
+        self.elapsed: float | None = None  # 全部连完用了多少秒（汇总行里显示）
         self._thread: threading.Thread | None = None
         #: 是否后台连接：是的话工具要由界面在连完后接进智能体（构造时还没有）
         self.background = background and bool(servers)
@@ -420,6 +423,7 @@ class MCPManager:
                 self._register(config, result)
         finally:
             with self._done_lock:
+                self.elapsed = time.monotonic() - self._started
                 self._done.set()
                 callbacks, self._callbacks = self._callbacks, []
             for callback in callbacks:

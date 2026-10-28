@@ -163,19 +163,28 @@ def connecting(repl: Repl) -> list[str]:
 
 
 def startup_line(repl: Repl) -> list[str]:
-    """欢迎页的 MCP 状态（rich 标记）：都连上了就一行汇总，不刷屏；连不上的每个单独一行红字写原因。"""
+    """MCP 连接结果（rich 标记）：每个服务一行（连上的绿字写工具数与连接方式，连不上的红字写原因），最后一行汇总与用时。
+
+    以前都连上时只打一行汇总，用户反馈看不出连了哪些服务、各有几个工具，改回逐个列出。
+    """
     if not repl.mcp_status:
         return []
     pending = connecting(repl)
-    if pending:  # 后台连接：欢迎页不等它们；连完后在用户第一次提交输入时再打印这一段
+    if pending:  # 后台连接：欢迎页不等它们；连完后（输入框出现前或提交输入时）再打印这一段
         return [f"[dim]MCP：{len(pending)} 个服务正在后台连接，可以先输入（发出时还没连好会等一下）[/]"]
-    ok, tools, _ = counts(repl)
     lines = []
-    if ok:
-        lines.append(f"[green]MCP：{ok} 个服务已连接 · {tools} 个工具[/]  [dim]/mcp 查看[/]")
     for name, good, detail in repl.mcp_status:
-        if not good and name not in repl.mcp_disabled:
+        if name in repl.mcp_disabled:
+            continue
+        if good:
+            lines.append(f'[green]MCP 服务 "{escape(name)}" 已连接 · {escape(detail)}[/]')
+        else:
             lines.append(f'[red]MCP 服务 "{escape(name)}" 连接失败：{escape(detail)}[/]')
+    ok, tools, failed = counts(repl)
+    took = max((m.elapsed for m in repl.mcp_managers if m.background and m.elapsed is not None), default=None)
+    spent = f"，用时 {took:.1f} 秒" if took is not None else ""
+    broken = f"，{failed} 个连不上" if failed else ""
+    lines.append(f"[dim]MCP：{ok} 个服务已连接 · {tools} 个工具{broken}{spent}  /mcp 查看[/]")
     return lines
 
 

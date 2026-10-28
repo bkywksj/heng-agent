@@ -529,7 +529,7 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin):
         self.console.print(
             "[cyan]✦[/] [dim]@文件 附上内容 · !命令 直接执行 · / 补全命令 · Shift+Tab 切换权限模式 · Ctrl+C 中断[/]"
         )
-        for line in mcp_view.startup_line(self):  # 都连上了只一行汇总；连不上的才逐个红字列出
+        for line in mcp_view.startup_line(self):  # 每个服务一行，最后一行汇总
             self.console.print(line)
         if self.agent.settings.update_check and not is_dev():
             # 只读上一次查到的结果（不等网络），再在后台查下一次：有新版本下次启动就能提示
@@ -862,6 +862,9 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin):
         if self.untrusted_mcp:
             self.ask_trust_mcp()
         while True:
+            # 欢迎页之后若有确认问题（信任钩子、信任 MCP）挡着，等用户答完服务往往已经连好：
+            # 在输入框出现前就把结果打出来，不然欢迎页一直写着「后台连接中」，看起来没有任何变化（用户反馈）
+            self._sync_mcp(wait=False)
             try:
                 text = self.read()
             except (EOFError, KeyboardInterrupt):
