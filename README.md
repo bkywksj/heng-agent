@@ -254,9 +254,25 @@ heng-agent --provider heng --model heng-mini-0.1
 
 其他支持 ACP 的客户端（JetBrains 系列 IDE 等）按各自的说明添加命令 `heng-agent --acp` 即可。
 
-- 服务商与密钥用 heng-agent 自己的配置（先在终端里运行一次 `heng-agent` 按引导配好）；
-- 权限模式在客户端的模式下拉框里切换（每次问 / 改文件不问 / 只读 / 全部放行）；
+- 服务商与密钥用 heng-agent 自己的配置（先在终端里运行一次 `heng-agent` 按引导配好），或者由客户端启动时用环境变量给（见下）；
+- 客户端里有三个下拉框：模型（列出配好、能用的服务商）、权限模式（每次问 / 改文件不问 / 只读 / 全部放行）、思考（开 / 关）；
 - 项目里还没被信任的钩子与 MCP 服务在 ACP 模式下不加载（没法弹信任确认）：在终端里打开一次这个项目、确认信任即可。
+
+### 启动时用环境变量给服务商
+
+别的程序（如智码）启动 heng-agent 时，可以用环境变量直接给服务商——只在这次运行里用，不写进配置文件，
+也不会弹第一次用的引导；终端模式、`-p` 与 `--acp` 都认：
+
+| 环境变量 | 说明 |
+|---|---|
+| `HENG_AGENT_BASE_URL` | 服务地址。设了它才启用，设了就是这次运行的默认服务商（名字叫 `env`） |
+| `HENG_AGENT_API_KEY` | 密钥 |
+| `HENG_AGENT_MODEL` | 模型名（必填） |
+| `HENG_AGENT_PROTOCOL` | `anthropic`（默认）或 `openai` |
+| `HENG_AGENT_AUTH` | `auto`（默认）、`x-api-key` 或 `bearer` |
+
+命令行的 `--provider` 仍然优先。用专门的变量名、不读 `ANTHROPIC_BASE_URL` 这类：不少人为别的工具全局设着
+`ANTHROPIC_API_KEY`，一看到就用会悄悄绕开你在 heng-agent 里配好的默认服务商。
 
 ## 脚本模式（-p）
 
