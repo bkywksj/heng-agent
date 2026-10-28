@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+  <title>heng-agent</title>
+  <defs>
+    <linearGradient id="heng-mark-grad" x1="2" y1="3" x2="22" y2="21" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#22d3ee"/>
+      <stop offset="1" stop-color="#2563eb"/>
+    </linearGradient>
+  </defs>
+  <g fill="url(#heng-mark-grad)">
+    <rect x="2" y="3" width="4.6" height="18" rx="1.2"/>
+    <rect x="17.4" y="3" width="4.6" height="18" rx="1.2"/>
+  </g>
+  <path d="M9.3 7.6L14.4 12L9.3 16.4" fill="none" stroke="url(#heng-mark-grad)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

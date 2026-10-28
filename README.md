@@ -1,3 +1,5 @@
+<img src="https://raw.githubusercontent.com/bkywksj/heng-agent/master/docs/brand/logo-256.png" width="96" alt="heng-agent">
+
 # heng-agent
 
 类似 Claude Code 的终端编码智能体：用中文派活，它读代码、改代码、跑命令，直到任务完成。
