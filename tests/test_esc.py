@@ -61,8 +61,14 @@ def _box() -> tuple[InputBox, Any]:
 def test_esc_in_input_box() -> None:
     box, pipe = _box()
     pipe.send_text("写了一半")
-    threading.Timer(0.3, pipe.send_text, [ESC]).start()  # ESC 清空
-    threading.Timer(0.6, pipe.send_text, ["重写" + ENTER]).start()
+    threading.Timer(0.3, pipe.send_text, [ESC]).start()  # 单击 ESC 不清空（只提示）：一大段字不该一按就没
+    threading.Timer(0.6, pipe.send_text, ["，接着写" + ENTER]).start()
+    assert box.prompt() == "写了一半，接着写"
+    box, pipe = _box()
+    pipe.send_text("写了一半")
+    threading.Timer(0.3, pipe.send_text, [ESC]).start()  # 双击 ESC：清空
+    threading.Timer(0.5, pipe.send_text, [ESC]).start()
+    threading.Timer(0.8, pipe.send_text, ["重写" + ENTER]).start()
     assert box.prompt() == "重写"
     box, pipe = _box()
     threading.Timer(0.2, pipe.send_text, [ESC]).start()
@@ -185,3 +191,28 @@ def test_rewind_command_prefills_question(tmp_path: Path, monkeypatch: pytest.Mo
     monkeypatch.setattr(repl, "_ask", lambda prompt="": "2")  # 选择器用不了时退回打编号
     repl.handle_command("/rewind")
     assert len(agent.turns) == 1 and repl._prefill == "第二问\n第二行"  # 那一问放回输入框，等改了重发
+
+
+def test_cleared_draft_comes_back_with_up() -> None:
+    """双击 ESC、Ctrl+C 清掉的草稿存进了历史：按 ↑ 能找回来（以前清了就没了）。"""
+    UP, CTRL_C = "\x1b[A", "\x03"
+    for clear in ([ESC, ESC], [CTRL_C]):
+        box, pipe = _box()
+        pipe.send_text("一大段没发的话")
+        for i, key in enumerate(clear):
+            threading.Timer(0.3 + 0.2 * i, pipe.send_text, [key]).start()
+        threading.Timer(0.9, pipe.send_text, [UP]).start()
+        threading.Timer(1.2, pipe.send_text, [ENTER]).start()
+        assert box.prompt() == "一大段没发的话", clear
+
+
+def test_fast_double_escape_is_not_swallowed() -> None:
+    """两下 ESC 一口气到达（比组合键的等待还快）时被当成「ESC ESC」组合键，以前没绑定、两下都丢了（真实终端里实测）。"""
+    box, pipe = _box()
+    pipe.send_text("写了一半")
+    threading.Timer(0.3, pipe.send_text, [ESC + ESC]).start()  # 一起到达
+    threading.Timer(0.7, pipe.send_text, ["重写" + ENTER]).start()
+    assert box.prompt() == "重写"
+    box, pipe = _box()
+    threading.Timer(0.3, pipe.send_text, [ESC + ESC]).start()  # 空框：回退
+    assert box.prompt() == REWIND

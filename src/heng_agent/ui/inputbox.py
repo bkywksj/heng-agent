@@ -237,13 +237,21 @@ class InputBox:
             if self.turn is not None:
                 self.turn.detach()
 
+        def clear_saving_draft() -> None:
+            """清空输入框，但先把草稿存进历史：清掉了还能按 ↑ 找回来（Claude Code 也是这样，以前清了就没了）。"""
+            if buffer.text.strip():
+                buffer.append_to_history()
+            buffer.reset()
+
         @kb.add("c-c")
         def _interrupt(event: KeyPressEvent) -> None:
-            if self.turn is not None and not buffer.text:  # 回答中、框是空的：打断这一问（不是退出程序）
+            if self.turn is not None:  # 回答中：打断这一问（框里有草稿也打断，草稿留着不发——和 Claude Code 一样）
                 self.turn.interrupt("ctrl-c")
                 return
             if buffer.text:
-                buffer.reset()  # 框里有字：先清空
+                clear_saving_draft()  # 框里有字：先清空（↑ 能找回）
+                self.flash = "已清空（↑ 找回）· 再按一次 Ctrl+C 退出"
+                self._last_ctrl_c = time.monotonic()
                 return
             # 空框：2 秒内连按两次才退出——中断任务时多按了一下、清空后顺手又按，都不该丢掉整个会话
             now = time.monotonic()
@@ -256,17 +264,33 @@ class InputBox:
         @kb.add("escape", filter=~is_searching)  # 不用 eager（Alt+V、方向键都以 ESC 开头）；搜索中的 ESC 是取消搜索
         def _escape(event: KeyPressEvent) -> None:
             now = time.monotonic()
-            if self.turn is not None and not buffer.text:  # 回答中、框是空的：打断这一问（和 Claude Code 一样）
+            if self.turn is not None:  # 回答中：打断这一问；框里的草稿留着不发，排队的话接着发（同 Claude Code）
                 self.turn.interrupt("esc")
                 return
+            double = now - self._last_esc <= DOUBLE_ESC_SECONDS
+            self._last_esc = now
             if buffer.text:
-                buffer.reset()  # 有字：ESC 清空
-                self._last_esc = now
-            elif now - self._last_esc <= DOUBLE_ESC_SECONDS:
+                # 有字：双击才清空（单击清空太容易误删一大段），清空前存进历史、↑ 能找回
+                if double:
+                    clear_saving_draft()
+                    self.flash = "已清空（↑ 找回）"
+                    self._last_esc = -1e9  # 清空后马上再按两下才是「回退」，不接着算
+                else:
+                    self.flash = "再按一次 ESC 清空（↑ 找回）"
+            elif double:
                 event.app.exit(result=REWIND)  # 空框里双击 ESC：回退到之前的某一问
             else:
-                self._last_esc = now
                 self.flash = "再按一次 ESC 回退到之前的某一问"
+
+        @kb.add("escape", "escape", filter=~is_searching)
+        def _double_escape(event: KeyPressEvent) -> None:
+            # 两下 ESC 隔得比 KEY_SEQUENCE_TIMEOUT 还近时，prompt_toolkit 把它们当成一个「ESC ESC」组合键，
+            # 没有绑定的话两下都被丢掉——快速双击什么也不发生（真实终端里实测）。按「刚按过一下」处理第二下
+            if self.turn is not None:
+                self.turn.interrupt("esc")
+                return
+            self._last_esc = time.monotonic()
+            _escape(event)
 
         @kb.add("c-t")
         def _toggle_todos(event: KeyPressEvent) -> None:

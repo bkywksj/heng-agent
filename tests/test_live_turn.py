@@ -190,3 +190,15 @@ def test_up_arrow_takes_queued_back(live: Any) -> None:
     threading.Timer(0.6, pipe.send_text, [UP]).start()  # 取回来：排队的清空、都回到输入框里
     _run(repl, "你好")
     assert repl._queued == [] and repl._prefill == "第一句\n第二句"  # 没发出去，下次输入框里接着改
+
+
+def test_escape_with_draft_still_interrupts_and_keeps_draft(live: Any) -> None:
+    """回答中框里有草稿时 ESC 也打断（以前只是清空草稿、不打断）；草稿留着、下次输入框里接着写；排队的话照样接着发。"""
+    make, pipe = live
+    repl, _ = make(SlowModel([["不该出现"]], delay=5.0))
+    threading.Timer(0.2, pipe.send_text, ["排着队的\r"]).start()
+    threading.Timer(0.4, pipe.send_text, ["写了一半"]).start()
+    threading.Timer(0.7, pipe.send_text, [ESC]).start()
+    with pytest.raises(KeyboardInterrupt):
+        _run(repl, "你好")
+    assert repl._prefill == "写了一半" and repl._queued == ["排着队的"]
