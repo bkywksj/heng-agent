@@ -45,7 +45,7 @@ jobs:
       - name: 检查安装包内容
         run: |
           uv run --with twine twine check dist/*
-          python3 -c "import zipfile, glob; n = zipfile.ZipFile(glob.glob('dist/*.whl')[0]).namelist(); assert any('/prompts/' in x for x in n), '安装包里没有内置提示词'"
+          python3 -c "import zipfile, glob; n = zipfile.ZipFile(glob.glob('dist/*.whl')[0]).namelist(); assert any('/prompts/' in x for x in n), '安装包里没有内置提示词'; assert any('/skills/' in x and x.endswith('SKILL.md') for x in n), '安装包里没有内置技能'"
       - uses: actions/upload-artifact@v4
         with:
           name: dist

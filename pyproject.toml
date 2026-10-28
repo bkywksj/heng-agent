@@ -43,7 +43,8 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 # setuptools 默认只打包 .py：内置提示词（/commit、/review）不声明就不会进安装包，装好后找不到文件、启动就崩
-heng_agent = ["prompts/*.md"]
+# 内置技能同理：skills/<名字>/SKILL.md
+heng_agent = ["prompts/*.md", "skills/*/*.md"]
 
 [tool.ruff]
 line-length = 120

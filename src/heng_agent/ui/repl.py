@@ -54,6 +54,7 @@ from heng_agent.session import SessionStore
 from heng_agent.tools.background import describe
 from heng_agent.tools.base import Tool
 from heng_agent.tools.shell import clip, run_command, shell_argv
+from heng_agent.tools.skill import skill_source
 from heng_agent.tools.subagent import SubAgentTool
 from heng_agent.tools.todo import render as render_todos
 from heng_agent.ui import info, mcp_view, terminal_setup
@@ -1013,10 +1014,18 @@ class Repl:
         elif cmd == "/mcp":
             self.mcp_command(rest)
         elif cmd == "/skills":
-            if not a.skills:
-                c.print("没有技能。放在 .heng-agent/skills/<名字>/SKILL.md（项目）或 ~/.heng-agent/skills/（用户）。")
+            # 按来源分组：内置的谁都有；用户、项目的可以改写同名的内置技能（放一个同名的 SKILL.md 即可）
+            groups: dict[str, list[Any]] = {}
             for s in a.skills.values():
-                c.print(f"  {escape(s.name):<20} {escape(s.description)}  [dim]{escape(str(s.path))}[/]")
+                groups.setdefault(skill_source(s, a.settings.home, a.settings.workdir), []).append(s)
+            order = ["项目", "Claude 项目", "用户", "Claude 用户", "内置", "其他"]
+            for label in sorted(groups, key=lambda x: order.index(x) if x in order else len(order)):
+                c.print(f"[bold]{label}[/]")
+                for s in groups[label]:
+                    summary = s.description.strip().splitlines()[0] if s.description.strip() else ""
+                    c.print(f"  [cyan]{escape(s.name):<18}[/] {escape(summary)}")
+            c.print("[dim]自己的技能放在 .heng-agent/skills/<名字>/SKILL.md（项目）或 ~/.heng-agent/skills/（用户）；"
+                    "和内置技能同名就会替换它[/]")  # fmt: skip
         elif cmd == "/terminal-setup":
             self.terminal_setup()
         elif cmd == "/worktree":

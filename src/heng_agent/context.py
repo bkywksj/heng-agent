@@ -118,9 +118,19 @@ def build_system_prompt(settings: Settings, skills: dict[str, Skill] | None = No
         parts.append(preamble)
     parts += [block for _, block in memories]
     if skills:
-        listing = "\n".join(f"- {s.name}：{s.description}" for s in skills.values())
+        listing = "\n".join(f"- {s.name}：{skill_summary(s.description)}" for s in skills.values())
         parts.append(f"# 可用技能\n\n任务和下面某个技能对得上时，先用 skill 工具读它的完整说明再动手：\n{listing}")
     return "\n\n".join(parts)
+
+
+SKILL_SUMMARY_CHARS = 250
+
+
+def skill_summary(description: str) -> str:
+    """技能清单里的一行：多行描述压成一行、太长截断。清单只用来让模型挑技能，真用时 skill 工具会读完整说明；
+    多行原样放进来会把清单格式搅乱，几十个长描述（如 ruoyi-plus-uniapp 的 60 个技能）也白占每次对话的上下文。"""
+    text = " ".join(description.split())
+    return text if len(text) <= SKILL_SUMMARY_CHARS else text[: SKILL_SUMMARY_CHARS - 1] + "…"
 
 
 MAX_MENTION_BYTES = 200_000
