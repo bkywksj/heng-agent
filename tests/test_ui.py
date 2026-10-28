@@ -67,6 +67,21 @@ def test_banner_and_mcp_status(tmp_path: Path) -> None:
     assert "Shift+Tab" in text  # 提示行
 
 
+@pytest.mark.parametrize(("dev", "sgr"), [(False, "36"), (True, "35")])
+def test_banner_logo_color_by_channel(tmp_path: Path, monkeypatch, dev: bool, sgr: str) -> None:  # type: ignore[no-untyped-def]
+    from heng_agent.ui import repl as repl_mod
+
+    monkeypatch.setattr(repl_mod, "is_dev", lambda: dev)
+    work = tmp_path / "w"
+    work.mkdir()
+    console = Console(record=True, width=140, force_terminal=True, color_system="standard")
+    repl_mod.Repl(Agent(Settings(workdir=work, home=tmp_path / "h"), FakeModel([])), console=console).banner()
+    styled = console.export_text(styles=True)
+    for line in repl_mod.LOGO:  # 方块字标两行都在，正式版青色（36）、开发版品红（35）
+        assert f"\x1b[1;{sgr}m{line}" in styled
+    assert ("开发版" in styled) is dev
+
+
 def test_spinner_follows_events_and_stops_before_asking(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     from heng_agent.core.types import TextDelta, ToolFinished, ToolResult, ToolStarted, TurnDone
 

@@ -76,6 +76,9 @@ from heng_agent.ui.sixel import encode as sixel_encode
 from heng_agent.ui.sixel import supports_sixel
 from heng_agent.updates import cached_newer_version, check_in_background
 
+# 欢迎页的方块字标「HENG」，与 docs/brand/logo.svg 同属一套品牌；正式版青色、开发版品红，颜色在 banner() 里上
+LOGO = ("█ █ █▀▀ █▄ █ █▀▀", "█▀█ ██▄ █ ▀█ █▄█")
+
 HELP = """查看状态
   /status                     一屏看全当前状态：版本、模型、会话、目录、权限、MCP、说明文件、扩展（/version 同）
   /usage                      本会话用量：输入输出、缓存命中率、花费、上下文占用（/cost 同）
@@ -919,7 +922,10 @@ class Repl:
         color = "magenta" if dev else "cyan"
         with contextlib.suppress(Exception):
             self.console.set_window_title("heng-agent [开发版]" if dev else "heng-agent")
-        body = f"[bold {color}]█▀█  欢迎使用 heng-agent！[/]{badge}\n[{color}]█ █[/]  输入 /help 查看命令\n\n"
+        body = (
+            f"[bold {color}]{LOGO[0]}[/]   [bold]欢迎使用 heng-agent！[/]{badge}\n"
+            f"[bold {color}]{LOGO[1]}[/]   [dim]输入 /help 查看命令[/]\n\n"
+        )
         body += "\n".join(f"[bold]{k:<4}[/] {v}" for k, v in rows)
         self.console.print(Panel(body, border_style=color, padding=(1, 2)))
         self.console.print(
