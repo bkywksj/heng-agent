@@ -124,3 +124,16 @@ def test_escape_interrupts_the_turn(live: Any) -> None:
     with pytest.raises(KeyboardInterrupt):
         _run(repl, "你好")
     assert time.monotonic() - start < 4 and repl._esc_pressed  # 很快停下，按原来的方式收尾（「已中断（按了 ESC）」）
+
+
+def test_rich_spinner_is_stopped_so_it_cannot_draw_into_the_box(live: Any) -> None:
+    """主循环在一问开始前就用 rich 的 Status 转起了「思考中」，它自己的线程一直往光标处画——光标在输入框里，
+    「思考中」就画进了输入框、盖住 ›，直到模型回来第一段（真实终端里实测）。回答中只能画在输入框上方那一行。"""
+    make, _ = live
+    repl, _ = make(SlowModel([["好"]], delay=0.8))
+    repl._spin("思考中…")  # 和主循环一样：进新流程之前先转起来
+    seen: list[Any] = []
+    threading.Timer(0.3, lambda: seen.append((repl._status, repl._turn_activity))).start()
+    _run(repl, "你好")
+    status, activity = seen[0]
+    assert status is None and activity is not None  # rich 的转圈停了，转圈交给了输入框上方那一行

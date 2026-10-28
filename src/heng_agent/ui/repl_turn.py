@@ -106,6 +106,11 @@ class TurnMixin:
 
         box.turn = TurnHooks(live=self._turn_live_text, queued=lambda: self._queued, interrupt=self._turn_interrupt,
                              detach=self.agent.ctx.detach.set, before_draw=writer.drain)  # type: ignore[attr-defined]  # fmt: skip
+        # 主循环在这之前已经用 rich 的 Status 转起了「思考中」：它有自己的线程，一直往光标所在处画——光标此刻在
+        # 输入框里，于是「思考中」画进了输入框、盖住 ›，直到模型回来第一段才停（真实终端里实测，不是一闪而过）。
+        # 先停掉它，再把转圈交给输入框上方那一行
+        self._unspin()  # type: ignore[attr-defined]
+        self._spin("思考中…")  # type: ignore[attr-defined]
         worker = threading.Thread(target=work, name="heng-turn", daemon=True)
         worker.start()
         draft = ""
