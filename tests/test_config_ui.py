@@ -334,3 +334,16 @@ def test_path_followed_by_chinese_punctuation(tmp_path: Path) -> None:
     out, attached = absorb_paths(f"看看 {shot}，帮我分析一下。还有@别的.png", work)
     assert len(attached) == 1  # 含中文的路径认出来了，只认这一个（后面的 @别的.png 本来就是 @ 写法，不动）
     assert out.startswith("看看 @.heng-agent/attachments/") and "，帮我分析一下。还有@别的.png" in out
+
+
+def test_long_chinese_reply_never_loses_characters(tmp_path: Path) -> None:
+    """一长串汉字放不下时折到下一行，不截断：以前「在这些场景中，CPU」被截成「在这 …」，中间的字丢了。"""
+    repl, _ = _repl(tmp_path)
+    para = (
+        "asyncio 最擅长处理 I/O 密集型任务，如网络请求、数据库查询、文件读写等场景。"
+        "在这些场景中，CPU 大部分时间在等待。"
+    )
+    console = Console(record=True, width=60, force_terminal=False)
+    console.print(repl._reply(para))
+    shown = "".join(line.strip() for line in console.export_text().splitlines())
+    assert "…" not in shown and "在这些场景中，CPU" in shown and "大部分时间在等待" in shown

@@ -233,7 +233,9 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin, Tu
         """
         grid = Table.grid(padding=(0, 1))
         grid.add_column(width=1, no_wrap=True)
-        grid.add_column(ratio=1)
+        # overflow="fold"：放不下就折到下一行。默认是截断加省略号——中文之间没有空格，rich 把一长串汉字当一个「词」，
+        # 一行放不下时整串被截掉（「在这些场景中，CPU」变成「在这 …」，字丢了；真实终端里看长回复时发现）
+        grid.add_column(ratio=1, overflow="fold")
         grid.add_row("", Markdown(autolink(text)))
         return grid
 
