@@ -30,6 +30,7 @@ dependencies = [
     "prompt_toolkit>=3.0", # 输入框：多行、历史、斜杠命令补全
     "pydantic>=2.6",      # 配置与消息的严格校验
     "pillow>=10",         # 图片缩略图（Sixel 终端内预览）
+    "agent-client-protocol>=0.12.1,<0.13",  # ACP（--acp 模式）：0.x 次版本可能不兼容，测过再升
 ]
 
 [project.optional-dependencies]

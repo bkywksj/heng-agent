@@ -63,6 +63,8 @@ def _enable_vt() -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="heng-agent", description="终端编码智能体：读代码、改代码、跑命令。")
+    p.add_argument("--acp", action="store_true",
+                   help="ACP 模式：让编辑器（智码、Zed、JetBrains……）通过标准输入输出驱动 heng-agent")  # fmt: skip
     p.add_argument("--version", action="version", version=f"heng-agent {version_label()}")
     p.add_argument(
         "-p",
@@ -310,6 +312,10 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         return run_upgrade()
     args = build_parser().parse_args(argv)
+    if args.acp:  # 协议模式：服务商、目录等都由客户端按会话给，下面的交互式准备一概不做
+        from heng_agent import acp_server
+
+        return acp_server.run()
     try:
         settings = make_settings(args)  # 会读配置文件的 settings 段：写错了要给出可读的错误，而不是一堆堆栈
         if args.worktree:  # -w 名字：在独立的 git 工作树（独立分支）里干活，整个会话从那里开始
