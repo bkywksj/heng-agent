@@ -25,6 +25,7 @@ import queue
 import re
 import subprocess
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -382,8 +383,12 @@ class MCPManager:
         self.errors: list[str] = []
         #: 每个服务的连接状态：(名字, 是否连上, 工具数与连接方式或失败原因)，欢迎页逐行显示
         self.status: list[tuple[str, bool, str]] = []
-        for config in servers:
-            self._connect(config)
+        # 各服务同时连：启动慢的服务（npx 拉起的要好几秒）以前一个接一个排队，6 个服务实测 10 秒，并行后只等最慢的那个。
+        # 线程里只建连接、握手；登记工具与状态回到这里按配置顺序做，工具与欢迎页的顺序不随谁先连上而变
+        with ThreadPoolExecutor(max_workers=max(1, len(servers)), thread_name_prefix="mcp-connect") as pool:
+            opened = list(pool.map(self._open, servers))
+        for config, result in zip(servers, opened, strict=True):
+            self._register(config, result)
 
     def _set_status(self, name: str, ok: bool, detail: str) -> None:
         """同名的状态原地替换（重连后位置不变），没有就追加。"""
@@ -394,17 +399,29 @@ class MCPManager:
                 return
         self.status.append(entry)
 
-    def _connect(self, config: ServerConfig) -> list[MCPTool]:
+    def _open(self, config: ServerConfig) -> tuple[_Session, list[dict[str, Any]]] | AgentError:
+        """建连接并握手，返回 (连接, 工具定义) 或失败原因。不碰共享状态，可以在线程里并行跑。"""
         client: _Session | None = None  # 失败时只关这一个，不能误关别的服务
         try:
             client = HttpMCPClient(config, self.workdir) if config.url else MCPClient(config, self.workdir)
-            specs = client.initialize()
+            return client, client.initialize()
         except AgentError as exc:
-            self.errors.append(str(exc))
-            self._set_status(config.name, False, str(exc))
             if client is not None:
                 client.close()
+            return exc
+
+    def _connect(self, config: ServerConfig) -> list[MCPTool]:
+        return self._register(config, self._open(config))
+
+    def _register(
+        self, config: ServerConfig, result: tuple[_Session, list[dict[str, Any]]] | AgentError
+    ) -> list[MCPTool]:
+        """把一次连接的结果记进工具列表与状态（只在主线程里调）。"""
+        if isinstance(result, AgentError):
+            self.errors.append(str(result))
+            self._set_status(config.name, False, str(result))
             return []
+        client, specs = result
         self.clients[config.name] = client
         tools = [MCPTool(client, spec) for spec in specs]
         self.tools += tools
@@ -429,6 +446,10 @@ class MCPManager:
         return removed, self._connect(self.configs[name])
 
     def close(self) -> None:
-        for client in self.clients.values():
-            client.close()
+        # 各服务同时收尾：Windows 上结束一个 stdio 服务要起一次 taskkill（约 0.5～1 秒），
+        # 以前排队关，6 个服务退出要等 5 秒
+        clients = list(self.clients.values())
         self.clients.clear()  # 可以重复调用：界面和命令行入口退出时都会关
+        if clients:
+            with ThreadPoolExecutor(max_workers=len(clients), thread_name_prefix="mcp-close") as pool:
+                list(pool.map(lambda client: client.close(), clients))
