@@ -14,17 +14,25 @@ from typing import Any
 
 from heng_agent.core.types import ToolResult
 from heng_agent.tools.base import Tool, ToolContext
-from heng_agent.tools.paths import SKIP_DIRS, display, resolve_in_workdir
+from heng_agent.tools.paths import SKIP_DIRS, display, is_inside, resolve_in_workdir
 
 MAX_RESULTS = 200
 MAX_FILE_BYTES = 2 * 1024 * 1024  # 超过 2 MB 的文件不搜：多半是数据或产物
 
 
-def walk_files(root: Path) -> Iterator[Path]:
+def walk_files(root: Path, workdir: Path) -> Iterator[Path]:
+    """遍历 root 下的文件，只给出解析后仍在工作目录内的。
+
+    os.walk 不跟目录符号链接，但会钻进 Windows 的目录联接（它不算符号链接）；文件符号链接则照样列出来。
+    所以逐个检查：逃到外面的目录直接剪掉不进去，逃到外面的文件跳过——否则 grep 能读出工作目录外的文件内容。
+    """
+    boundary = workdir.resolve()
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS)
+        here = Path(dirpath)
+        dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS and is_inside(here / d, boundary))
         for name in sorted(filenames):
-            yield Path(dirpath) / name
+            if is_inside(here / name, boundary):
+                yield here / name
 
 
 class Glob(Tool):
@@ -43,7 +51,7 @@ class Glob(Tool):
         base = resolve_in_workdir(args.get("path") or ".", ctx.workdir)
         pattern = args["pattern"]
         hits = []
-        for f in walk_files(base):
+        for f in walk_files(base, ctx.workdir):
             rel = f.relative_to(base).as_posix()
             # 「**/x」也要匹配根目录下的 x：fnmatch 的 * 不跨 /，所以多试一次去掉前缀的形式
             if fnmatch.fnmatch(rel, pattern) or (pattern.startswith("**/") and fnmatch.fnmatch(rel, pattern[3:])):
@@ -74,7 +82,7 @@ class Grep(Tool):
         except re.error as exc:
             return ToolResult(f"正则表达式写错了：{exc}", is_error=True)
         base = resolve_in_workdir(args.get("path") or ".", ctx.workdir)
-        files = [base] if base.is_file() else walk_files(base)
+        files = [base] if base.is_file() else walk_files(base, ctx.workdir)
         name_glob = args.get("glob")
         out: list[str] = []
         total = 0

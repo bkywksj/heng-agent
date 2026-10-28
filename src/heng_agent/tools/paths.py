@@ -26,6 +26,19 @@ def resolve_in_workdir(raw: str, workdir: Path) -> Path:
     return target
 
 
+def is_inside(path: Path, root: Path) -> bool:
+    """path 解析后（跟随符号链接与 Windows 目录联接）是否仍在 root 内；root 要先 resolve 过。
+
+    遍历目录的工具（grep、glob）对每个遍历到的条目都要问一遍：起点在工作目录里不代表遍历出的都在——
+    工作目录里一个指向外部的链接就能把外面的文件带进来（以前 grep 就这样读出过工作目录外的文件内容）。
+    """
+    try:
+        target = path.resolve()
+    except OSError:  # 断掉的链接、没权限：当成在外面，不碰
+        return False
+    return target == root or root in target.parents
+
+
 def display(path: Path, workdir: Path) -> str:
     """给模型和用户看的相对路径（正斜杠）。"""
     try:

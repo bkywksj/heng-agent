@@ -112,3 +112,59 @@ def test_timeout_kills_whole_process_tree(ctx: ToolContext) -> None:
     assert time.monotonic() - started < 2.5
     time.sleep(3)
     assert not (ctx.workdir / "marker.txt").exists()
+
+
+# ---------- 链接逃逸：grep / glob 遍历时不能顺着链接读到工作目录外 ----------
+
+SECRET = "TOP-SECRET-0xC0FFEE"
+
+
+def _escape_setup(tmp_path: Path) -> tuple[ToolContext, Path]:
+    """工作目录与「外面」是兄弟目录；外面放一个装着密钥的文件。"""
+    work, outside = tmp_path / "work", tmp_path / "outside"
+    work.mkdir()
+    outside.mkdir()
+    (outside / "id_rsa").write_text(f"key = {SECRET}\n", encoding="utf-8")
+    (work / "ok.txt").write_text("hello\n", encoding="utf-8")
+    return ToolContext(workdir=work, bash_timeout=30), outside
+
+
+def _link_dir(link: Path, target: Path) -> None:
+    """目录链接：Windows 上建目录联接（junction，不要管理员权限，是现实里最容易被利用的），其余系统建符号链接。"""
+    if sys.platform == "win32":
+        import _winapi
+
+        _winapi.CreateJunction(str(target), str(link))
+    else:
+        link.symlink_to(target, target_is_directory=True)
+
+
+def test_grep_glob_do_not_follow_dir_link_outside(tmp_path: Path) -> None:
+    """以前：工作目录里一个指向外部的目录链接，grep 就能把外面的文件内容读出来（os.walk 会钻进 Windows 的目录联接）。"""
+    ctx, outside = _escape_setup(tmp_path)
+    _link_dir(ctx.workdir / "linked", outside)
+    found = Grep().run({"pattern": "TOP-SECRET"}, ctx).content
+    assert SECRET not in found
+    assert "id_rsa" not in Glob().run({"pattern": "**/*"}, ctx).content
+    assert "ok.txt" in Glob().run({"pattern": "**/*"}, ctx).content  # 工作目录里的照常找得到
+
+
+def test_grep_glob_do_not_follow_file_link_outside(tmp_path: Path) -> None:
+    ctx, outside = _escape_setup(tmp_path)
+    try:
+        (ctx.workdir / "notes.txt").symlink_to(outside / "id_rsa")
+    except OSError:
+        pytest.skip("这台机器建不了文件符号链接（Windows 要开发者模式）")
+    assert SECRET not in Grep().run({"pattern": "TOP-SECRET"}, ctx).content
+    with pytest.raises(AgentError, match="工作目录"):  # 直接点名这个文件：路径校验本来就拒
+        Grep().run({"pattern": "TOP", "path": "notes.txt"}, ctx)
+    assert "notes.txt" not in Glob().run({"pattern": "*.txt"}, ctx).content
+
+
+def test_links_inside_workdir_still_work(tmp_path: Path) -> None:
+    """指向工作目录里面的链接不受影响。"""
+    ctx, _ = _escape_setup(tmp_path)
+    (ctx.workdir / "src").mkdir()
+    (ctx.workdir / "src" / "a.py").write_text("needle = 1\n", encoding="utf-8")
+    _link_dir(ctx.workdir / "alias", ctx.workdir / "src")
+    assert "needle" in Grep().run({"pattern": "needle"}, ctx).content
