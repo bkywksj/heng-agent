@@ -62,7 +62,6 @@ MODE_LABEL = {mode: f"{name}（{mode}）" for mode, name in MODE_NAME.items()}
 STYLE = Style.from_dict(
     {
         "bottom-toolbar": "noreverse #c8ccd4",  # 不加底色：两行状态栏带底色在深色终端里太突兀（用户反馈）
-        "frame-title": "nobold #5c6370",  # 边框上的按键提示：灰、不加粗，不抢输入的视线
         "flash": "#98c379",
         "todos": "#7f848e",
         "queued": "#7f848e",  # 回答中排着队的消息：灰色，和 Claude Code 一样

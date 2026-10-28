@@ -695,8 +695,12 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin, Tu
         )
         body += "\n".join(f"[bold]{k:<4}[/] {v}" for k, v in rows)
         self.console.print(Panel(body, border_style=color, padding=(1, 2)))
+        # 按键提示只在这里说一次（以前还写在输入框的上边框上，每次都在，用户觉得不好看）；全的在 /help
         self.console.print(
-            "[cyan]✦[/] [dim]@文件 附上内容 · !命令 直接执行 · / 补全命令 · Shift+Tab 切换权限模式 · Ctrl+C 中断[/]"
+            "[cyan]✦[/] [dim]@文件 附上内容 · !命令 直接执行 · / 补全命令 · Shift+Enter 换行 · Alt+V 粘贴图片[/]"
+        )
+        self.console.print(
+            "[cyan]✦[/] [dim]Shift+Tab 切换权限模式 · ESC 中断 · 回答中也能接着输入（Enter 排队）· /help 看全部[/]"
         )
         for line in mcp_view.startup_line(self):  # 每个服务一行，最后一行汇总
             self.console.print(line)

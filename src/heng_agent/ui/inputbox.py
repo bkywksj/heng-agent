@@ -48,7 +48,6 @@ from heng_agent.ui.prompt import CmdCompletion
 from heng_agent.ui.winkeys import enable_shift_enter
 
 FRAME_COLORS = {"ask": "#61afef", "accept-edits": "#c678dd", "plan": "#98c379", "auto": "#e5c07b"}
-TITLE = " Shift+Enter 换行 · / 命令 · @ 文件 · Alt+V 粘贴图片 "
 MAX_LINES = 10  # 输入框最多长到多少行（更长的内容在框内滚动）
 MENU_ROWS = 8  # 补全菜单最多显示几行
 MAX_PATH_COMPLETIONS = 40
@@ -90,9 +89,6 @@ class PathCompleter(Completer):
             shown += 1
             if shown >= MAX_PATH_COMPLETIONS:
                 return
-
-
-TURN_TITLE = " 回答中：Enter 排队发送 · ESC 中断 · Ctrl+B 转后台 "
 
 
 @dataclass
@@ -416,13 +412,8 @@ class InputBox:
 
         top = VSplit(
             [
+                # 上边框不再写按键提示（用户反馈「输入框不好看」）：挪到欢迎页那两行，/help 里也有
                 Window(width=1, height=1, char="╭"),
-                Window(width=1, height=1, char="─"),
-                Window(
-                    FormattedTextControl(lambda: [("class:frame-title", TITLE if self.turn is None else TURN_TITLE)]),
-                    height=1,
-                    dont_extend_width=True,
-                ),
                 Window(height=1, char="─"),
                 Window(width=1, height=1, char="╮"),
             ]
