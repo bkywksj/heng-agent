@@ -12,9 +12,12 @@
 from __future__ import annotations
 
 import os
+import threading
 import time
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from prompt_toolkit.application import Application, get_app, run_in_terminal
 from prompt_toolkit.application.current import set_app
@@ -88,6 +91,34 @@ class PathCompleter(Completer):
                 return
 
 
+TURN_TITLE = " 回答中：Enter 排队发送 · ESC 中断 · Ctrl+B 转后台 "
+
+
+@dataclass
+class TurnHooks:
+    """一问正在进行时输入框要用的东西（Repl 提供）。
+
+    live：输入框上方「正在进行」那块的内容（转圈与计时、还没写完的那段回复），每 0.1 秒重画一次；
+    queued：排着队、这一问结束后发出的消息；interrupt：ESC / Ctrl+C 打断这一问；detach：Ctrl+B 前台命令转后台；
+    before_draw：每次画出输入框之前调（Repl 把攒着、还没打到屏幕上的输出先打出来）。
+    """
+
+    live: Callable[[], AnyFormattedText]
+    queued: Callable[[], list[str]]
+    interrupt: Callable[[str], None]
+    detach: Callable[[], None]
+    before_draw: Callable[[], None]
+
+
+@dataclass(frozen=True)
+class TurnSignal:
+    """别的线程让输入框收起来时 prompt 的返回值：kind 是 done（这一问结束了）或 approval（要你确认），
+    draft 是框里已经敲了、还没发的字（接着画输入框时放回去）。"""
+
+    kind: str
+    draft: str
+
+
 class InputBox:
     def __init__(
         self,
@@ -126,6 +157,11 @@ class InputBox:
         self.flash = ""  # 一次性提示（如「已粘贴图片」），显示在状态栏下面
         self._last_ctrl_c = -1e9  # 空框里上一次按 Ctrl+C 的时间（连按两次才退出）
         self._last_esc = -1e9  # 上一次按 ESC 的时间（空框里双击 ESC 回退）
+        #: 一问正在进行时由 Repl 设上（None = 平常的输入框）。见 TurnHooks
+        self.turn: TurnHooks | None = None
+        self._signals: list[str] = []  # 别的线程要求收起输入框（输入框还没画出来时先记着，画出来立刻收）
+        self._signal_lock = threading.Lock()
+        self._buffer: Buffer | None = None  # 正在用的输入区（收起时取出没发的字）
 
     def _bindings(self, buffer: Buffer) -> KeyBindings:
         kb = KeyBindings()
@@ -182,8 +218,16 @@ class InputBox:
             self.set_mode(nxt)
             event.app.invalidate()
 
+        @kb.add("c-b", filter=Condition(lambda: self.turn is not None))
+        def _detach(event: KeyPressEvent) -> None:
+            if self.turn is not None:
+                self.turn.detach()
+
         @kb.add("c-c")
         def _interrupt(event: KeyPressEvent) -> None:
+            if self.turn is not None and not buffer.text:  # 回答中、框是空的：打断这一问（不是退出程序）
+                self.turn.interrupt("ctrl-c")
+                return
             if buffer.text:
                 buffer.reset()  # 框里有字：先清空
                 return
@@ -198,6 +242,9 @@ class InputBox:
         @kb.add("escape", filter=~is_searching)  # 不用 eager（Alt+V、方向键都以 ESC 开头）；搜索中的 ESC 是取消搜索
         def _escape(event: KeyPressEvent) -> None:
             now = time.monotonic()
+            if self.turn is not None and not buffer.text:  # 回答中、框是空的：打断这一问（和 Claude Code 一样）
+                self.turn.interrupt("esc")
+                return
             if buffer.text:
                 buffer.reset()  # 有字：ESC 清空
                 self._last_esc = now
@@ -224,7 +271,7 @@ class InputBox:
 
         @kb.add("c-d")
         def _eof(event: KeyPressEvent) -> None:
-            if not buffer.text:
+            if not buffer.text and self.turn is None:  # 回答中不退出
                 event.app.exit(exception=EOFError())
 
         @kb.add("c-l")
@@ -291,7 +338,11 @@ class InputBox:
             [
                 Window(width=1, height=1, char="╭"),
                 Window(width=1, height=1, char="─"),
-                Window(FormattedTextControl([("class:frame-title", TITLE)]), height=1, dont_extend_width=True),
+                Window(
+                    FormattedTextControl(lambda: [("class:frame-title", TITLE if self.turn is None else TURN_TITLE)]),
+                    height=1,
+                    dont_extend_width=True,
+                ),
                 Window(height=1, char="─"),
                 Window(width=1, height=1, char="╮"),
             ]
@@ -315,6 +366,27 @@ class InputBox:
             ),
             filter=Condition(lambda: self.show_todos and bool(todo_text())),
         )
+        turn_active = Condition(lambda: self.turn is not None)
+        # 正在进行：转圈与计时、还没写完的那段回复（写完的段落已经打印到上方，见 Repl._run_turn_live）
+        # 至少留一行：一问刚开始时这块是空的（高 0），转圈一出现就长成 1 行，界面整体变高的那一下画错了位置，
+        # 转圈画进了输入框里（真实终端里实测）。一开始就占住一行，高度不再从 0 跳起来
+        live = ConditionalContainer(
+            Window(
+                FormattedTextControl(lambda: self.turn.live() if self.turn else ""),
+                dont_extend_height=True,
+                height=lambda: Dimension(min=1),
+            ),
+            filter=turn_active,
+        )
+
+        def queued_text() -> list[tuple[str, str]]:
+            items = self.turn.queued() if self.turn else []
+            return [("class:queued", "\n".join(f" ⧗ 排队：{q.splitlines()[0][:80]}" for q in items))]
+
+        queued = ConditionalContainer(
+            Window(FormattedTextControl(queued_text), dont_extend_height=True),
+            filter=Condition(lambda: bool(self.turn and self.turn.queued())),
+        )
         flash = ConditionalContainer(
             Window(FormattedTextControl(lambda: [("class:flash", f" {self.flash}")]), height=1),
             filter=Condition(lambda: bool(self.flash)),
@@ -323,10 +395,38 @@ class InputBox:
         menu_space = ConditionalContainer(Window(height=Dimension.exact(MENU_ROWS)), filter=has_completions)
         root = FloatContainer(
             # 顶部对齐：光标下方多出来的空间留在最下面，不分给输入框
-            content=HSplit([todo_box, frame, search, status, flash, menu_space], align=VerticalAlign.TOP),
+            content=HSplit([live, queued, todo_box, frame, search, status, flash, menu_space], align=VerticalAlign.TOP),
             floats=[Float(xcursor=True, ycursor=True, content=CompletionsMenu(max_height=MENU_ROWS, scroll_offset=1))],
         )
         return root, body
+
+    def signal(self, kind: str, before: Callable[[], None] | None = None) -> None:
+        """别的线程要求收起输入框（这一问结束了、要你确认）：prompt 返回 TurnSignal。线程安全。
+
+        before：收起之前在界面线程里调（把攒着的输出打出来，免得收起后才看到）。输入框此刻没画出来
+        （刚收起、正在确认框里）就先记着，下次画出来时立刻收。
+        """
+        with self._signal_lock:
+            self._signals.append(kind)
+        app = self.app
+        loop = app.loop if app is not None else None
+        if app is not None and loop is not None and app.is_running:
+            loop.call_soon_threadsafe(lambda: self._exit_for_signal(app, before))
+
+    def _exit_for_signal(self, app: Application[Any], before: Callable[[], None] | None) -> None:
+        with self._signal_lock:
+            if not self._signals or app.future is None or app.future.done():
+                return
+            kind = self._signals.pop(0)
+        draft = self._buffer.text if self._buffer is not None else ""
+
+        async def finish() -> None:
+            if before is not None:
+                await run_in_terminal(before)
+            if app.future is not None and not app.future.done():
+                app.exit(result=TurnSignal(kind, draft))  # type: ignore[arg-type]
+
+        app.create_background_task(finish())
 
     def refresh(self) -> None:
         """叫正在显示的输入框重画（状态栏内容变了时）。可以在别的线程里调：invalidate 是线程安全的。"""
@@ -375,12 +475,26 @@ class InputBox:
         # 另一个等待：有 Alt+V、Alt+Enter 这些「ESC 开头」的组合键绑定时，单独的 ESC 还要再等 timeoutlen（默认 1 秒）
         # 看后面跟不跟键——两次 ESC 各被拖近 1 秒，间隔超出双击窗口，双击 ESC 就认不出来（实测卡住）
         app.timeoutlen = KEY_SEQUENCE_TIMEOUT
+        if self.turn is not None:
+            app.refresh_interval = 0.1  # 计时、转圈、流式文字要动起来
+        self._buffer = buffer
         # 历史是异步加载的：PromptSession 会自己触发，这里手搭的 Application 要主动做，否则上箭头取不到历史
         self.app = app
         try:
-            text = app.run(pre_run=buffer.load_history_if_not_yet_loaded)
+            text = app.run(pre_run=lambda: self._pre_run(app, buffer))
         finally:
             self.app = None
+        if isinstance(text, TurnSignal):
+            return text  # type: ignore[return-value]
         if text.strip():
             buffer.append_to_history()
         return text
+
+    def _pre_run(self, app: Application[Any], buffer: Buffer) -> None:
+        buffer.load_history_if_not_yet_loaded()
+        if self.turn is not None:
+            self.turn.before_draw()
+        with self._signal_lock:
+            pending = bool(self._signals)
+        if pending:  # 收起期间来了信号（如确认完之后这一问正好结束）：一画出来就收
+            self._exit_for_signal(app, None)

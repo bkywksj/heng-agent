@@ -75,6 +75,7 @@ from heng_agent.ui.repl_commands import CommandsMixin
 from heng_agent.ui.repl_mcp import McpMixin
 from heng_agent.ui.repl_memory import MemoryMixin
 from heng_agent.ui.repl_session import SessionMixin
+from heng_agent.ui.repl_turn import TurnMixin
 from heng_agent.ui.select import Option, ask_line, choose
 from heng_agent.ui.session_tools import (
     copy_text,
@@ -132,7 +133,7 @@ HELP = """查看状态
   空输入框里连按两次 Ctrl+C 退出"""
 
 
-class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin):
+class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin, TurnMixin):
     #: 内置命令：同名的自定义命令不生效
     BUILTIN = frozenset({"help", "clear", "mode", "model", "provider", "compact", "undo", "todo", "cost", "skills",
                          "mcp", "config", "rewind", "resume", "rename", "permissions", "copy", "export",
@@ -174,6 +175,9 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin):
         # 确认框里选了「以后都允许」：把规则写进用户配置
         agent.permissions.on_persist = self._persist_rule
         self._plain_input = False  # 输入框用不了时退回普通输入
+        self._queued: list[str] = []  # 回答中敲下 Enter 的话：这一问结束后按顺序发出（见 repl_turn）
+        self._turn_live_render: Any = None  # 回答中：还没写完的那段回复，画在输入框上方（见 repl_turn）
+        self._turn_activity: Any = None  # 回答中：转圈旁边的文字
         self._turn_started = time.time()  # 当前这一问是什么时候提的：结尾那行写时间与用时
         self._tool_started = time.time()  # 正在跑的工具什么时候开始的：等待动画计时、结果后面写用时
         # 状态栏要起子进程才拿得到的数据（git 分支、用户的状态栏命令）：后台跑、缓存，跑完重画输入框
@@ -204,6 +208,7 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin):
         if self._live is not None:
             self._live.stop()
             self._live = None
+        self._turn_live_render = None  # 回答中：这段要正式打印了，「正在进行」那块不再画它
         if not text.strip():
             return
         if self._reply_started:
@@ -434,6 +439,9 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin):
         if self._live is not None:
             return  # 正在流式输出文字时不叠加动画（rich 同一时间只能有一个实时区域）
         message = Ticker(text, hint, self._turn_started if started is None else started, limit)
+        if self._in_live_turn():  # 回答中输入框一直在：转圈画在输入框上方，不用 rich 的 Status（会和输入框抢光标）
+            self._turn_activity = message
+            return
         if self._status is None:
             self._status = self.console.status(message, spinner="dots")
             self._status.start()
@@ -448,7 +456,11 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin):
         hint = "ESC 中断 · Ctrl+B 转后台" if foreground_bash else "ESC 中断"
         self._spin(f"{tool_label(name)}…", hint, started=self._tool_started, limit=limit)
 
+    def _in_live_turn(self) -> bool:
+        return self._box is not None and self._box.turn is not None
+
     def _unspin(self) -> None:
+        self._turn_activity = None
         if self._status is not None:
             self._status.stop()
             self._status = None
@@ -480,7 +492,9 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin):
             if done:
                 self._commit(done)
                 self._buf = rest
-            if self._buf:
+            if self._buf and self._in_live_turn():
+                self._turn_live_render = self._reply(self._buf, first=not self._reply_started)
+            elif self._buf:
                 if self._live is None:
                     # transient：停止时擦掉，由 _commit 把完整内容正式打印；crop：超长的一段只显示放得下的部分，不重复
                     self._live = Live(console=c, refresh_per_second=10, transient=True, vertical_overflow="crop")
@@ -954,7 +968,8 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin):
             self._sync_mcp(wait=False)
             self._refresh_bar()
             try:
-                text = self.read()
+                # 回答中排进队列的话：这一问结束后按顺序发出，像刚输入的一样（会显示在对话里）
+                text = self._queued.pop(0) if self._queued else self.read()
             except (EOFError, KeyboardInterrupt):
                 return 0
             if not text:
@@ -1003,10 +1018,13 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin):
             try:
                 self._spin("思考中…")
                 self._esc_pressed = False
-                self._watcher = EscWatcher(self._on_escape, self.agent.ctx.detach.set)  # ESC 中断；Ctrl+B 转后台
-                self._watcher.start()
                 started = time.monotonic()
-                self.agent.run(text, self.on_event, self.approve, images=images)
+                if self._live_turn_ok():
+                    self._run_turn_live(text, images)  # 回答中输入框一直在（见 repl_turn）
+                else:  # 没有带边框输入框的终端：照旧在主线程跑，后台线程只认 ESC / Ctrl+B
+                    self._watcher = EscWatcher(self._on_escape, self.agent.ctx.detach.set)
+                    self._watcher.start()
+                    self.agent.run(text, self.on_event, self.approve, images=images)
                 self.notify_if_long(time.monotonic() - started)
             except KeyboardInterrupt:
                 self._end_text()

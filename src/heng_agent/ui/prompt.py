@@ -64,6 +64,7 @@ STYLE = Style.from_dict(
         "frame-title": "nobold #5c6370",  # 边框上的按键提示：灰、不加粗，不抢输入的视线
         "flash": "#98c379",
         "todos": "#7f848e",
+        "queued": "#7f848e",  # 回答中排着队的消息：灰色，和 Claude Code 一样
         "bar.mode": "#7f848e",  # 手动确认是平常状态：灰色、不抢眼
         "bar.mode-edits": "bold #e5c07b",
         "bar.mode-auto": "bold #e06c75",
