@@ -115,7 +115,7 @@ def test_doctor_report_has_checks_and_logs_without_user_home(tmp_path: Path, mon
 
 
 def _doctor_repl(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Repl, Console]:
-    from heng_agent.ui import repl as repl_module
+    from heng_agent.ui import repl as repl_module  # run_checks 在 repl.py 的 /doctor 分支里调
 
     monkeypatch.setattr(repl_module, "run_checks", lambda repl: CHECKS)  # 不真去连服务商
     work = tmp_path / "w"
@@ -125,7 +125,7 @@ def _doctor_repl(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Repl,
 
 
 def test_doctor_copy_puts_report_on_clipboard(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from heng_agent.ui import repl as repl_module
+    from heng_agent.ui import repl_commands as repl_module  # /doctor copy 在 repl_commands 里
 
     copied: list[str] = []
     monkeypatch.setattr(repl_module, "copy_text", lambda text: (copied.append(text), (True, ""))[1])
@@ -137,7 +137,7 @@ def test_doctor_copy_puts_report_on_clipboard(tmp_path: Path, monkeypatch: pytes
 
 def test_doctor_copy_falls_back_to_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """剪贴板用不了（Linux 上没装 xclip 之类）：存成文件，告诉用户在哪。"""
-    from heng_agent.ui import repl as repl_module
+    from heng_agent.ui import repl_commands as repl_module  # /doctor copy 在 repl_commands 里
 
     monkeypatch.setattr(repl_module, "copy_text", lambda text: (False, "找不到剪贴板工具"))
     repl, console = _doctor_repl(tmp_path, monkeypatch)
@@ -149,7 +149,7 @@ def test_doctor_copy_falls_back_to_file(tmp_path: Path, monkeypatch: pytest.Monk
 
 
 def test_plain_doctor_does_not_copy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from heng_agent.ui import repl as repl_module
+    from heng_agent.ui import repl_commands as repl_module  # /doctor copy 在 repl_commands 里
 
     monkeypatch.setattr(repl_module, "copy_text", lambda text: pytest.fail("不带 copy 不该复制"))
     repl, _ = _doctor_repl(tmp_path, monkeypatch)

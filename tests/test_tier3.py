@@ -157,7 +157,7 @@ def test_doctor(tmp_path: Path) -> None:
 def test_tool_label_and_approval_body() -> None:
     from heng_agent.mcp import MCPTool
     from heng_agent.tools.base import builtin_tools
-    from heng_agent.ui.repl import approval_body, tool_label
+    from heng_agent.ui.render import approval_body, tool_label
 
     assert tool_label("mcp__sigil__list_credentials") == "sigil · list_credentials"
     assert tool_label("bash") == "运行" and tool_label("custom_tool") == "custom_tool"

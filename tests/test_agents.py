@@ -12,7 +12,7 @@ from fake_model import FakeModel
 from heng_agent.agent import Agent
 from heng_agent.agents import discover_agents
 from heng_agent.core.config import Settings
-from heng_agent.ui import repl as repl_module
+from heng_agent.ui import repl_commands
 from heng_agent.ui.repl import Repl
 
 
@@ -120,7 +120,7 @@ def test_agents_command(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
     repl = Repl(Agent(Settings(workdir=work, home=tmp_path / "h"), FakeModel([])), console=console)
     repl.handle_command("/agents")
     edited = "---\ndescription: 写单元测试\ntools: read_file, write_file\n---\n你是测试员。"
-    monkeypatch.setattr(repl_module, "edit_in_editor", lambda text: edited)
+    monkeypatch.setattr(repl_commands, "edit_in_editor", lambda text: edited)  # /agents new 在 repl_commands 里
     repl.handle_command("/agents new 测试员")
     assert (
         (work / ".heng-agent" / "agents" / "测试员.md")

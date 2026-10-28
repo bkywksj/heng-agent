@@ -15,7 +15,8 @@ from fake_model import FakeModel
 from heng_agent.agent import Agent
 from heng_agent.core.config import Settings
 from heng_agent.ui import session_tools
-from heng_agent.ui.repl import Repl, brief_result
+from heng_agent.ui.render import brief_result
+from heng_agent.ui.repl import Repl
 from heng_agent.ui.session_tools import context_rows, export_markdown, last_reply, session_diff
 
 

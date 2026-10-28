@@ -122,7 +122,7 @@ def test_attachments_render_as_hyperlinks(tmp_path: Path) -> None:
     """指向真实文件的 @引用 / 绝对路径渲染成 OSC 8 超链接：智码终端据此悬停预览，Windows Terminal 里 Ctrl+点击打开。"""
     import io
 
-    from heng_agent.ui.repl import linkify
+    from heng_agent.ui.render import linkify
 
     work = tmp_path / "w"
     (work / "att").mkdir(parents=True)
@@ -154,7 +154,7 @@ def test_enable_vt_is_safe_without_console() -> None:
 
 
 def test_split_done_never_cuts_code_blocks() -> None:
-    from heng_agent.ui.repl import split_done
+    from heng_agent.ui.render import split_done
 
     assert split_done("第一段\n\n第二段还在写") == ("第一段", "第二段还在写")
     assert split_done("还没写完一段") == ("", "还没写完一段")
@@ -199,7 +199,7 @@ def test_spinner_resumes_after_approval(tmp_path: Path, monkeypatch: pytest.Monk
 def test_autolink() -> None:
     import io
 
-    from heng_agent.ui.repl import autolink
+    from heng_agent.ui.render import autolink
 
     assert autolink("百度：https://www.baidu.com。") == "百度：<https://www.baidu.com>。"  # 中文句号不算进网址
     assert autolink("见 https://a.com/x.") == "见 <https://a.com/x>."

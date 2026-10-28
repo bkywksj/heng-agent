@@ -19,7 +19,7 @@ from heng_agent.model.providers import Profile, load_profiles
 from heng_agent.permissions import Permissions, Rules
 from heng_agent.session import SessionStore
 from heng_agent.tools.base import builtin_tools
-from heng_agent.ui import repl as repl_module
+from heng_agent.ui import repl_session
 from heng_agent.ui.repl import Repl
 
 TOOLS = {t.name: t for t in builtin_tools()}
@@ -165,7 +165,7 @@ def test_permissions_command(tmp_path: Path) -> None:
 
 def test_model_picker(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     repl, _ = _repl(tmp_path)
-    monkeypatch.setattr(repl_module, "list_models", lambda profile: ["m1", "m2", "m3"])
+    monkeypatch.setattr(repl_session, "list_models", lambda profile: ["m1", "m2", "m3"])  # /model 在 repl_session 里
     answers = iter(["2", "y"])  # 选择器用不了时退回打字：选第 2 个，存成默认
     monkeypatch.setattr(repl, "_ask", lambda prompt="": next(answers))
     repl.handle_command("/model")
