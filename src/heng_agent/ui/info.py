@@ -18,6 +18,7 @@ from rich.table import Table
 
 from heng_agent.context import estimate_tokens, load_memories
 from heng_agent.core.version import version_label
+from heng_agent.hooks import CLAUDE_ONLY_HOOKS
 from heng_agent.model.providers import Profile, load_profiles
 from heng_agent.model.thinking import describe as describe_thinking
 from heng_agent.ui import mcp_view
@@ -261,6 +262,7 @@ def show_hooks(repl: Repl) -> None:
     if repl.untrusted_hooks:
         untrusted = len(repl.untrusted_hooks)
         c.print(f"[yellow]项目里还有 {untrusted} 个钩子没确认信任，没有生效[/]（重新打开 heng-agent 时会问）")
+    c.print(f"[dim]专给 Claude Code 用的集成钩子不跑（命令里含：{escape('、'.join(CLAUDE_ONLY_HOOKS))}）[/]")
     skip = a.settings.claude_hooks_skip
     if skip:
         c.print(f"[dim]按 settings.claude_hooks_skip 跳过命令里含这些文字的 Claude 钩子：{escape('、'.join(skip))}[/]")

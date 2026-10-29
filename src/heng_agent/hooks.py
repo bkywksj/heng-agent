@@ -117,6 +117,13 @@ def _read_claude_hooks(path: Path, source: str) -> list[Hook]:
     return hooks
 
 
+#: 专给 Claude Code 自己用的集成钩子（智码注册在 ~/.claude/settings.json 里的），在 heng-agent 里一律不跑：
+#: 会话记录器会把 heng 的会话记成 Claude 的；额度保护按 Claude 的额度拦 heng 的提问（heng 用的可能是别家服务）；
+#: 回复语言守卫读 Claude 格式的对话记录。智码的安全防护类钩子（危险命令拦截、临时文件落点）不在此列，照跑。
+#: 命令里含其中任一段文字即跳过；用户还能用 settings.claude_hooks_skip 再加。
+CLAUDE_ONLY_HOOKS = ("aicoder-claude-session-recorder", "aicoder-quota-guard", "aicoder-reply-language-guard")
+
+
 def load_hooks(
     home: Path, workdir: Path, *, claude_user: bool = True, skip: list[str] | tuple[str, ...] = ()
 ) -> tuple[list[Hook], list[Hook]]:
@@ -131,8 +138,10 @@ def load_hooks(
     for name in ("settings.json", "settings.local.json"):
         project += _read_claude_hooks(workdir / ".claude" / name, "project")
 
+    skips = (*CLAUDE_ONLY_HOOKS, *skip)
+
     def keep(hook: Hook) -> bool:
-        return hook.style != "claude" or not any(s and s in hook.command for s in skip)
+        return hook.style != "claude" or not any(s and s in hook.command for s in skips)
 
     return [h for h in user if keep(h)], [h for h in project if keep(h)]
 
