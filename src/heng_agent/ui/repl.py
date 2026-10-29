@@ -141,6 +141,7 @@ HELP = """查看状态
   @路径 附上文件；拖入文件、Alt+V 粘贴图片或文件；!命令 自己直接跑命令；Shift+Enter（或 Ctrl+J）换行
   回答中 ESC / Ctrl+C 打断这一问，Enter 把话排队、↑ 取回来改；答完 Tab / → 采纳灰字的下一句建议
   双击 ESC 清空输入框（空框里双击是 /rewind），Ctrl+C 也清空，清掉的按 ↑ 找回；Ctrl+L 清屏；Ctrl+B 把跑着的命令转到后台
+  回答中 Ctrl+X Ctrl+S 立刻发送：框里的话和排着队的话马上发（打断这一问）
   有子智能体在跑时：输入框最后一行按 ↓ 选中它，Enter 看它在做什么，ESC 回到输入框
   空输入框里连按两次 Ctrl+C 退出"""
 
@@ -187,6 +188,7 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin, Tu
         self._box: InputBox | None = None  # 带边框的输入框，第一次输入时创建
         self._watcher: EscWatcher | None = None  # 任务运行期间监听 ESC
         self._esc_pressed = False
+        self._send_now = False  # 这一问是 Ctrl+X Ctrl+S 打断的（立刻发送排队的话）
         self._prefill = ""  # 下次输入框预填的文字（/rewind 后把那一问放回来）
         # 确认框里选了「以后都允许」：把规则写进用户配置
         agent.permissions.on_persist = self._persist_rule
@@ -1153,7 +1155,7 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin, Tu
                 self._pending_shell.clear()
             try:
                 self._spin("思考中…")
-                self._esc_pressed = False
+                self._esc_pressed = self._send_now = False
                 started = time.monotonic()
                 if self._live_turn_ok():
                     self._run_turn_live(text, images)  # 回答中输入框一直在（见 repl_turn）
@@ -1166,9 +1168,12 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin, Tu
             except KeyboardInterrupt:
                 self._end_text()
                 self._unspin()
-                how = "按了 ESC" if self._esc_pressed else "按了 Ctrl+C"
                 self._gap()
-                self.console.print(f"[yellow]已中断（{how}；正在跑的命令连同子进程已终止）。可以接着说下一步。[/]")
+                if getattr(self, "_send_now", False):  # Ctrl+X Ctrl+S：主循环接着就发排队的话
+                    self.console.print("[yellow]已打断这一问，马上发你排队的话（正在跑的命令连同子进程已终止）。[/]")
+                else:
+                    how = "按了 ESC" if self._esc_pressed else "按了 Ctrl+C"
+                    self.console.print(f"[yellow]已中断（{how}；正在跑的命令连同子进程已终止）。可以接着说下一步。[/]")
             except AgentError as exc:
                 self._end_text()
                 self._unspin()

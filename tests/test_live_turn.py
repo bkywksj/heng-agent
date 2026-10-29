@@ -248,3 +248,39 @@ def test_turn_output_follows_window_width(tmp_path: Path) -> None:
     real.width = 90
     repl._turn_live_text()
     assert repl.console.width == 90
+
+
+SEND_NOW = "\x18\x13"  # Ctrl+X Ctrl+S
+
+
+def test_send_now_queues_the_draft_and_interrupts(live: Any) -> None:
+    """回答中 Ctrl+X Ctrl+S：框里的话排进去、打断这一问（照 Claude Code 的 send now）；打断后主循环把排队的话发出。"""
+    make, pipe = live
+    repl, _ = make(SlowModel([["不该出现"]], delay=5.0))
+    threading.Timer(0.2, pipe.send_text, ["先排一句\r"]).start()
+    threading.Timer(0.4, pipe.send_text, ["别等了，先看这个"]).start()
+    threading.Timer(0.7, pipe.send_text, [SEND_NOW]).start()
+    start = time.monotonic()
+    with pytest.raises(KeyboardInterrupt):
+        _run(repl, "你好")
+    assert time.monotonic() - start < 4 and repl._send_now and not repl._esc_pressed
+    assert repl._queued == ["先排一句", "别等了，先看这个"] and repl._prefill == ""  # 草稿发出去了，不再留在框里
+
+
+def test_send_now_with_only_queued_text(live: Any) -> None:
+    make, pipe = live
+    repl, _ = make(SlowModel([["不该出现"]], delay=5.0))
+    threading.Timer(0.2, pipe.send_text, ["排着队的\r"]).start()
+    threading.Timer(0.5, pipe.send_text, [SEND_NOW]).start()
+    with pytest.raises(KeyboardInterrupt):
+        _run(repl, "你好")
+    assert repl._queued == ["排着队的"]
+
+
+def test_send_now_with_nothing_to_send_does_not_interrupt(live: Any) -> None:
+    """框里没字、也没排队：不打断（误按了不该丢掉正在做的事）。"""
+    make, pipe = live
+    repl, console = make(SlowModel([["做完了"]], delay=0.8))
+    threading.Timer(0.2, pipe.send_text, [SEND_NOW]).start()
+    _run(repl, "你好")
+    assert "做完了" in console.export_text() and not repl._send_now

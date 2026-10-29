@@ -99,6 +99,7 @@ class TurnHooks:
     live：输入框上方「正在进行」那块的内容（转圈与计时、还没写完的那段回复），每 0.1 秒重画一次；
     queued：排着队的话（普通的话在这批工具跑完时插进这一问，命令等这一问结束再执行）；
     interrupt：ESC / Ctrl+C 打断这一问；detach：Ctrl+B 前台命令转后台；
+    send_now：Ctrl+X Ctrl+S 立刻发送——把框里的话也排进去、打断这一问，排队的话马上发；没有可发的返回 False；
     before_draw：每次画出输入框之前调（Repl 把攒着、还没打到屏幕上的输出先打出来）。
     """
 
@@ -108,6 +109,7 @@ class TurnHooks:
     detach: Callable[[], None]
     before_draw: Callable[[], None]
     take_queued: Callable[[], list[str]] = lambda: []  # ↑ 把排着队的话全部取回输入框里改
+    send_now: Callable[[str], bool] = lambda text: False
 
 
 @dataclass(frozen=True)
@@ -247,6 +249,20 @@ class InputBox:
             if taken:
                 text = "\n".join(taken) + ("\n" + buffer.text if buffer.text else "")
                 buffer.document = Document(text, len(text))
+
+        # 回答中 Ctrl+X Ctrl+S：立刻发送（照 Claude Code 的「ctrl+x ctrl+s to send now」）。不想等这批工具跑完、
+        # 也不想等这一问做完：框里的话排进去，打断这一问，排着队的话马上发。Ctrl+S 单按是搜索，两键连按不冲突
+        @kb.add("c-x", "c-s", filter=Condition(lambda: self.turn is not None))
+        def _send_now(event: KeyPressEvent) -> None:
+            if self.turn is None:
+                return
+            text = buffer.text
+            if not self.turn.send_now(text):
+                self.flash = "没有要发送的话：先输入，再按 Ctrl+X Ctrl+S"
+                return
+            if text.strip():
+                buffer.append_to_history()
+            buffer.reset()
 
         picking = Condition(lambda: self.agent_pick is not None)
 
@@ -470,7 +486,7 @@ class InputBox:
             for q in items:
                 when = "结束后执行" if q.lstrip()[:1] in ("/", "!", "#") else "工具跑完后插进这一问"
                 rows.append(f" ⧗ 排队（{when}）：{q.splitlines()[0][:80]}")
-            rows.append(" ↑ 取回来改")
+            rows.append(" ↑ 取回来改 · Ctrl+X Ctrl+S 立刻发送（打断这一问）")
             return [("class:queued", "\n".join(rows))]
 
         queued = ConditionalContainer(

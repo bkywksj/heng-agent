@@ -111,7 +111,7 @@ class TurnMixin:
         self._queue_lock = threading.Lock()
         box.turn = TurnHooks(live=self._turn_live_text, queued=lambda: list(self._queued),
                              interrupt=self._turn_interrupt, detach=self.agent.ctx.detach.set, before_draw=writer.drain,
-                             take_queued=self._take_queued)  # type: ignore[attr-defined]  # fmt: skip
+                             take_queued=self._take_queued, send_now=self._turn_send_now)  # type: ignore[attr-defined]  # fmt: skip
         self.agent.interjections = self._take_interjections  # 每批工具跑完时，排着队的普通的话插进这一问
         # 主循环在这之前已经用 rich 的 Status 转起了「思考中」：它有自己的线程，一直往光标所在处画——光标此刻在
         # 输入框里，于是「思考中」画进了输入框、盖住 ›，直到模型回来第一段才停（真实终端里实测，不是一闪而过）。
@@ -199,9 +199,21 @@ class TurnMixin:
             taken, self._queued[:] = list(self._queued), []  # type: ignore[attr-defined]
         return taken
 
+    def _turn_send_now(self, text: str) -> bool:
+        """Ctrl+X Ctrl+S（界面线程调）：框里的话也排进去，打断这一问；打断后主循环照常把排队的话按顺序发出。
+        框里没字、也没有排着队的话：什么都不做，返回 False。"""
+        with self._queue_lock:
+            if text.strip():
+                self._queued.append(text)  # type: ignore[attr-defined]
+            if not self._queued:  # type: ignore[attr-defined]
+                return False
+        self._turn_interrupt("send-now")
+        return True
+
     def _turn_interrupt(self, how: str) -> None:
-        """ESC / Ctrl+C：打断这一问（智能体在后台线程，取消靠标志与关掉连接）。"""
+        """ESC / Ctrl+C / 立刻发送：打断这一问（智能体在后台线程，取消靠标志与关掉连接）。"""
         self._esc_pressed = how == "esc"  # type: ignore[attr-defined]
+        self._send_now = how == "send-now"  # type: ignore[attr-defined]
         self.agent.cancel()
         self._turn_activity = None
 
