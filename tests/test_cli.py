@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -158,3 +159,25 @@ def test_choose_without_terminal_falls_back_to_typing(tmp_path: Path, monkeypatc
     monkeypatch.setattr(repl_module, "choose", must_not_open)
     monkeypatch.setattr(repl_module, "_stdin_is_terminal", lambda: False)
     assert repl._choose("选一个", []) is repl_module._PLAIN
+
+
+def test_session_id_preallocated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                 capsys: pytest.CaptureFixture[str]) -> None:  # fmt: skip
+    """--session-id：调用方（如智码）预先分配会话 id，不用事后猜刚开的是哪个会话。"""
+    from heng_agent.session import SessionStore
+
+    work = tmp_path / "w"
+    work.mkdir()
+    home = Path(os.environ["HENG_AGENT_HOME"])
+    monkeypatch.setattr(cli, "make_client", lambda profile, max_tokens: FakeModel([["好"]]))
+    sid = "zhima-3f2a9c1e-7b4d"
+    assert cli.main(["--workdir", str(work), "--session-id", sid, "-p", "你好"]) == 0
+    assert SessionStore(home, work, sid).path.is_file()  # 会话文件就叫这个 id
+    capsys.readouterr()
+    assert cli.main(["--workdir", str(work), "--session-id", sid, "-p", "再来"]) == 1
+    assert f"--resume {sid}" in capsys.readouterr().err  # 已在用：报错，不悄悄接到旧会话上
+    assert cli.main(["--workdir", str(work), "--session-id", "../../逃出去", "-p", "x"]) == 1
+    assert "不合法" in capsys.readouterr().err
+    assert not (home.parent / "逃出去.json").exists() and not list(tmp_path.rglob("逃出去.json"))
+    assert cli.main(["--workdir", str(work), "--session-id", "abc", "--resume", sid, "-p", "x"]) == 1
+    assert "不能和 --resume" in capsys.readouterr().err

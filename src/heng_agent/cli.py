@@ -7,6 +7,7 @@ import contextlib
 import json
 import os
 import platform
+import re
 import shutil
 import sys
 import traceback
@@ -115,6 +116,8 @@ def build_parser() -> argparse.ArgumentParser:
     )  # fmt: skip
     p.add_argument("-c", "--continue", dest="resume", action="store_const", const="",
                    help="接着这个目录最近的会话聊（同 --resume 不带 id）")  # fmt: skip
+    p.add_argument("--session-id", default=None, metavar="id",
+                   help="用指定的 id 开一个新会话（调用方预先分配 id，如智码）；id 已在用时报错")  # fmt: skip
     p.add_argument("--sessions", action="store_true", help="列出这个目录的会话")
     p.add_argument("-w", "--worktree", default=None, metavar="名字",
                    help="在独立的 git 工作树里工作（分支 heng/名字），不碰主分支")  # fmt: skip
@@ -169,6 +172,26 @@ def list_providers(settings: Settings) -> int:
         mark = "*" if name == default else " "
         print(f"{mark} {name:<12} {p.protocol:<9} {p.model:<24} {p.base_url}\n               {key}　{p.note}")
     return 0
+
+
+SESSION_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+
+
+def new_session_store(settings: Settings, session_id: str | None, *, resuming: bool) -> SessionStore | None:
+    """--session-id：用调用方预先分配的 id 开新会话（智码这样就不用事后猜「刚开的是哪个会话」，不会串号）。
+
+    id 只能是字母、数字、点、下划线、短横（也挡住 ../ 之类逃出会话目录）；已经在用就报错——和 Claude Code 一样，
+    不悄悄接到旧会话上，接着聊请用 --resume。"""
+    if session_id is None:
+        return None
+    if resuming:
+        raise AgentError("--session-id 是开新会话用的，不能和 --resume / --continue 一起用")
+    if not SESSION_ID.match(session_id):
+        raise AgentError(f"会话 id「{session_id}」不合法：只能用字母、数字、点、下划线、短横，最长 128 个字符")
+    store = SessionStore(settings.home, settings.workdir, session_id)
+    if store.path.exists():
+        raise AgentError(f"会话 id「{session_id}」已经在用了：接着聊请用 --resume {session_id}")
+    return store
 
 
 def list_sessions(settings: Settings) -> int:
@@ -365,6 +388,7 @@ def _main(argv: list[str] | None = None) -> int:
                 if args.resume
                 else SessionStore.latest(settings.home, settings.workdir)
             )
+        new_store = new_session_store(settings, args.session_id, resuming=args.resume is not None)
     except AgentError as exc:
         print(f"错误：{exc}", file=sys.stderr)
         return 1
@@ -410,7 +434,7 @@ def _main(argv: list[str] | None = None) -> int:
             settings.permission_mode,
             Rules(allow + split_rules(args.allowed_tools), deny + split_rules(args.disallowed_tools)),
         ),
-        session=session or SessionStore(settings.home, settings.workdir),
+        session=session or new_store or SessionStore(settings.home, settings.workdir),
         hooks=hooks,
     )
     if session is not None:
