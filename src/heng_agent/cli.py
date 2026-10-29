@@ -79,6 +79,8 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="非交互：执行这一个任务后退出；管道传进来的内容会附在后面（只写 -p 就把管道内容当问题）",
     )
+    p.add_argument("initial", nargs="?", default=None, metavar="要做的事",
+                   help="进入交互界面并先发出这句话（同 claude \"…\"；智码「带一句话新建会话」这样启动）")  # fmt: skip
     p.add_argument(
         "--output-format",
         choices=("text", "json", "stream-json"),
@@ -356,6 +358,8 @@ def _main(argv: list[str] | None = None) -> int:
             return 1
         return run_upgrade()
     args = build_parser().parse_args(argv)
+    if args.prompt == "" and args.initial:  # heng-agent "问题" -p：这句话就是 -p 的问题
+        args.prompt, args.initial = args.initial, None
     if args.acp:  # 协议模式：服务商、目录等都由客户端按会话给，下面的交互式准备一概不做
         from heng_agent import acp_server
 
@@ -476,6 +480,7 @@ def _main(argv: list[str] | None = None) -> int:
             provider_name=provider_name,
             mcp_status=manager.status,
             onboarding=needs_onboarding(settings.home) and not args.provider,
+            initial_prompt=args.initial,
         )
         repl.mcp_managers.insert(0, manager)  # /mcp reconnect / disable 要找得到用户配置里的服务
         repl.watch_mcp(manager)  # 后台连接中：状态栏转圈、显示进度，连完立刻显示结果

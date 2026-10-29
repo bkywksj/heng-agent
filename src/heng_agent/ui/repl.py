@@ -170,6 +170,7 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin, Tu
         provider_name: str = "",
         mcp_status: list[tuple[str, bool, str]] | None = None,
         onboarding: bool = False,
+        initial_prompt: str | None = None,
     ) -> None:
         self.agent = agent
         self.console = console or Console()
@@ -194,6 +195,8 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin, Tu
         agent.permissions.on_persist = self._persist_rule
         self._plain_input = False  # 输入框用不了时退回普通输入
         self._queued: list[str] = []  # 回答中敲下 Enter 的话：这一问结束后按顺序发出（见 repl_turn）
+        if initial_prompt:  # heng-agent "要做的事"：欢迎页（与引导、信任确认）之后先发出它，像刚输入的一样
+            self._queued.append(initial_prompt)
         self._btw_log: list[tuple[str, str]] = []  # 问过的旁支问题与回答（/btw 带上它们，只在内存里）
         self._setup_subagents()  # 子智能体面板、后台子智能体做完时的通知（见 repl_subagents）
         self._turn_live_render: Any = None  # 回答中：还没写完的那段回复，画在输入框上方（见 repl_turn）

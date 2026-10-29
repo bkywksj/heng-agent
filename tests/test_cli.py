@@ -181,3 +181,21 @@ def test_session_id_preallocated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     assert not (home.parent / "逃出去.json").exists() and not list(tmp_path.rglob("逃出去.json"))
     assert cli.main(["--workdir", str(work), "--session-id", "abc", "--resume", sid, "-p", "x"]) == 1
     assert "不能和 --resume" in capsys.readouterr().err
+
+
+def test_initial_prompt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """heng-agent "要做的事"：进入交互界面并先发出这句话（智码「带一句话新建会话」这样启动）。"""
+    from heng_agent.agent import Agent
+    from heng_agent.core.config import Settings
+    from heng_agent.ui.repl import Repl
+
+    agent = Agent(Settings(workdir=tmp_path, home=tmp_path / "h"), FakeModel([]))
+    assert Repl(agent, initial_prompt="把包邮门槛改成 88")._queued == ["把包邮门槛改成 88"]  # 欢迎页之后先发它
+    assert Repl(agent)._queued == []
+    # heng-agent "问题" -p：这句话当 -p 的问题
+    model = FakeModel([["好"]])
+    monkeypatch.setattr(cli, "make_client", lambda profile, max_tokens: model)
+    work = tmp_path / "w"
+    work.mkdir()
+    assert cli.main(["--workdir", str(work), "问一句", "-p"]) == 0
+    assert "问一句" in str(model.calls[0])
