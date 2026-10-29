@@ -9,7 +9,8 @@ from prompt_toolkit.history import InMemoryHistory
 from prompt_toolkit.input import create_pipe_input
 from prompt_toolkit.output import DummyOutput
 
-from heng_agent.core.types import TextDelta, TurnEnd
+from heng_agent.core.types import TextDelta, ToolCall, TurnEnd
+from heng_agent.model.providers import Profile
 from heng_agent.ui import suggest
 from heng_agent.ui.inputbox import InputBox
 from heng_agent.ui.prompt import MODES, STYLE, SlashCompleter
@@ -28,11 +29,54 @@ class Says:
         yield TurnEnd("end_turn", {"input_tokens": 1, "output_tokens": 1})
 
 
-def test_ask_uses_conversation_without_tools() -> None:
+CACHED = Profile(protocol="anthropic", base_url="https://x", model="m", api_key="k")
+NO_CACHE = Profile(protocol="openai", base_url="https://x", model="m", api_key="k")
+TOOLS = [{"name": "read_file", "description": "读文件", "input_schema": {"type": "object"}}]
+
+
+def test_cached_plan_keeps_the_main_prefix() -> None:
+    """吃缓存时请求前缀和主对话一模一样：同一个系统提示词、同样的工具声明、整段对话，只在末尾加一条要求。
+    以前不带工具：缓存按 工具 → 系统提示词 → 消息 比前缀，开头就对不上，整段对话每一问都按全价再发一遍。"""
+    request = suggest.plan(CACHED, "主对话的系统提示词", TALK, TOOLS)
+    assert request is not None and request.cached
+    assert request.system == "主对话的系统提示词" and request.tools == TOOLS
+    assert request.messages[:2] == TALK and request.messages[-1]["content"][0]["text"] == suggest.INSTRUCTION
     client = Says("「提交一下」")
-    assert suggest.ask(client, "", TALK) == "提交一下"  # 去掉引号
-    messages, tools = client.calls[0]
-    assert tools == [] and messages[1]["content"][0]["text"] == "测试全过了" and messages[-1]["role"] == "user"
+    assert suggest.ask(client, request) == "提交一下"  # 去掉引号
+    assert client.calls[0] == (request.messages, TOOLS)
+
+
+def test_uncached_plan_sends_only_recent_turns() -> None:
+    """没有缓存可吃（OpenAI 协议、关了缓存）：只带最近几问压成的一段文字、短系统提示词、不带工具。"""
+    long_talk: list[Any] = []
+    for i in range(10):
+        long_talk += [{"role": "user", "content": [{"type": "text", "text": f"第{i}问"}]},
+                      {"role": "assistant", "content": [{"type": "tool_use", "id": f"t{i}", "name": "read_file",
+                                                         "input": {"path": "a.py"}}]},
+                      {"role": "user", "content": [{"type": "tool_result", "tool_use_id": f"t{i}",
+                                                    "content": "x" * 5000}]},
+                      {"role": "assistant", "content": [{"type": "text", "text": f"第{i}答"}]}]  # fmt: skip
+    request = suggest.plan(NO_CACHE, "很长的系统提示词" * 1000, long_talk, TOOLS)
+    assert request is not None and not request.cached
+    assert request.system == suggest.BRIEF_SYSTEM and request.tools == [] and len(request.messages) == 1
+    text = request.messages[0]["content"][0]["text"]
+    assert "第6问" not in text and "用户：第7问" in text and "助手：第9答" in text  # 最近 3 问
+    assert "[助手调用工具 read_file" in text and "x" * 301 not in text  # 工具结果截短
+    assert len(text) < suggest.BRIEF_CHARS + len(suggest.INSTRUCTION) + 10
+    no_cache = CACHED.model_copy(update={"prompt_cache": False})
+    assert not suggest.plan(no_cache, "", TALK, TOOLS).cached  # type: ignore[union-attr]
+
+
+def test_tool_call_answer_is_dropped() -> None:
+    """带着工具声明，模型偶尔还是去调工具：整个丢掉，工具不执行。"""
+
+    class Calls(Says):
+        def stream(self, system: str, messages: list[Any], tools: list[Any]) -> Any:
+            yield TextDelta("我先看看")
+            yield ToolCall("t1", "read_file", {"path": "a.py"})
+            yield TurnEnd("tool_use", {})
+
+    assert suggest.ask(Calls(""), suggest.plan(CACHED, "", TALK, TOOLS)) == ""  # type: ignore[arg-type]
 
 
 def test_bad_answers_are_dropped() -> None:
@@ -40,7 +84,7 @@ def test_bad_answers_are_dropped() -> None:
     assert suggest.clean("（没有明显的下一步）") == ""
     assert suggest.clean("第一行\n第二行") == ""
     assert suggest.clean("很长" * 40) == ""
-    assert suggest.ask(Says("x"), "", TALK[:1]) == ""  # 上一条不是助手的回复（出错、被打断）：不问
+    assert suggest.plan(CACHED, "", TALK[:1], []) is None  # 上一条不是助手的回复（出错、被打断）：不问
 
 
 def _box(pipe: Any, tmp_path: Path) -> InputBox:
@@ -119,6 +163,7 @@ def test_repl_fetches_after_a_turn_and_respects_the_setting(tmp_path: Path, monk
         while not repl._box.suggestion and time.monotonic() < deadline:
             time.sleep(0.02)
         assert repl._box.suggestion == "提交一下"
+        assert made[0].calls[0][1] == repl.agent.tool_specs()  # 照主对话的前缀：工具声明一样
         repl.agent.settings = repl.agent.settings.model_copy(update={"prompt_suggestions": False})
         repl._suggest_next()  # 关掉了：清掉旧的，不再问
         assert repl._box.suggestion == "" and len(made) == 1

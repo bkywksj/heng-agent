@@ -324,14 +324,21 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin, Tu
         profile = getattr(self.agent.client, "profile", None)
         if profile is None:
             return
-        messages, system = list(self.agent.messages), self.agent.system_prompt()
+        agent, messages = self.agent, list(self.agent.messages)
+        request = suggest.plan(profile, agent.system_prompt(), messages, agent.tool_specs())
+        if request is None:
+            return
 
         def work() -> None:
             try:
                 client = make_client(profile, SUGGEST_MAX_TOKENS)
                 if hasattr(client, "effort"):
-                    client.effort = "low"  # 一句话的事：想得少一点，快、便宜
-                text = suggest.ask(client, system, messages)
+                    if request.cached:  # 思考设置也和主对话一样：改了思考参数，对话部分的缓存就失效
+                        client.thinking_budget = agent.thinking_budget if agent.thinking else 0
+                        client.effort = agent.effort
+                    else:
+                        client.effort = "low"  # 一句话的事：想得少一点，快、便宜
+                text = suggest.ask(client, request)
             except Exception as exc:  # 建议拿不到不影响使用：记日志，不打扰
                 logs.log.info("下一句建议没拿到：%s", exc)
                 return
