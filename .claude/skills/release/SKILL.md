@@ -58,9 +58,12 @@ description: |
    `/pypi/heng-agent/json` 有缓存，刚发完还显示上一版，别被它吓到）。PyPI 页面的说明 = 发版那一刻的 README，
    作者、左侧链接 = `pyproject.toml` 的 `authors`、`[project.urls]`——发出去就改不了，要改只能等下一版；
 10. **同步文档站**（`E:\my\AI模型\heng-agent-docs`，Astro；它自己的 CLAUDE.md 有验证门与提交规范）：
+    - 先跑 `pnpm sync changelog`（更新日志页的数据，从本仓库 CHANGELOG.md 生成，别手改），再跑 `pnpm check:heng`：
+      它核对版本号、命令速查的命令名单（`BUILTIN_HELP` + `BUILTIN_PROMPTS` + `ALIASES`）、更新日志是否同步，
+      对不上会点名哪几条；`pnpm verify` 第一步就是它；
     - `src/site.config.ts` 的 `version`（页头、首页徽章、指南「适用版本」都取它）；
-    - `src/data/commands.json`（命令与快捷键速查）对照 `ui/prompt.py` 的 `BUILTIN_HELP` 与 `ui/repl.py` 的 `HELP`：
-      新命令、改了用法的命令、改了的按键；
+    - `src/data/commands.json` 的**说明**是手写的，`check:heng` 只管名单：改了用法、改了按键的，对照 `ui/prompt.py` 的
+      `BUILTIN_HELP` 与 `ui/repl.py` 的 `HELP` 改说明；
     - 这一版 CHANGELOG 里的新功能，在指南里有没有地方讲；界面变了的，截图与终端示意图要重拍 / 重画；
     - `src/data/faq.json` 里和这一版矛盾的说法；页脚、关于页的版权人和 `NOTICE` 一致；
     - 文档站以前完全靠手写，0.3.0 之后三个版本都没跟上（2026-10-29 查出来的）：这一步别跳过。
