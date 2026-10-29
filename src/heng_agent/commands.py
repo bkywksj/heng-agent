@@ -78,7 +78,7 @@ def _builtin(name: str, description: str) -> Command:
 
 #: 内置的提示词命令：用户或项目里同名的 .md 会覆盖它们（可以按自己团队的规矩重写）
 BUILTIN_PROMPTS = {
-    "init": _builtin("init", "分析项目，生成或更新 HENG.md（项目说明，每次对话都会读）"),
+    "init": _builtin("init", "分析项目，生成或更新项目说明（默认 AGENTS.md，已有说明就更新现有的）"),
     "commit": _builtin("commit", "按仓库风格写提交信息并提交（不 push）"),
     "review": _builtin("review", "审查没提交的改动（只评审不修改）"),
 }
