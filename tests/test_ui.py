@@ -283,3 +283,21 @@ def test_spinner_shows_turn_output_tokens(tmp_path: Path) -> None:
     assert "思考中… (3s · ↓ 31.8k tokens) · ESC 中断" in console.export_text()
     console.print(Ticker("思考中…", "", time.time(), tokens=lambda: 0))
     assert "tokens" not in console.export_text()  # 还没有输出：不显示
+
+
+def test_deny_is_shown_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """确认框里选拒绝：只显示工具下面那行「⎿ 已拒绝」。以前选完还回显一行「→ 已拒绝」，两行说同一件事。"""
+    (tmp_path / "a.py").write_text("x = 1\n", encoding="utf-8")
+    model = FakeModel(
+        [[("tool", "edit_file", {"path": "a.py", "old_string": "x = 1", "new_string": "x = 2"})], ["没改"]]
+    )
+    console = Console(record=True, width=100, force_terminal=False)
+    repl = Repl(Agent(Settings(workdir=tmp_path, home=tmp_path / "h"), model), console=console)
+    monkeypatch.setattr(repl, "_choose", lambda title, options: "deny")
+    repl.agent.run("改一下", repl.on_event, repl.approve)
+    text = console.export_text()
+    assert text.count("已拒绝") == 1 and "⎿ 已拒绝" in text
+    assert (tmp_path / "a.py").read_text(encoding="utf-8") == "x = 1\n"  # 拒绝了就没改
+    monkeypatch.setattr(repl, "_choose", lambda title, options: "once")
+    assert repl.approve(repl.agent.tools["edit_file"], {"path": "a.py"}) == "once"
+    assert "→ 这次允许" in console.export_text()  # 允许的照旧回显

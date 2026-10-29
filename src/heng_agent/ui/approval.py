@@ -91,10 +91,10 @@ class ApprovalMixin:
             ])  # fmt: skip
             if picked is not _PLAIN:
                 answer = picked or "deny"  # ESC 取消 = 拒绝
-                shown = dict(
-                    once="这次允许", always="本会话一直允许", persist="以后都允许（已写进配置）", deny="已拒绝"
-                )
-                c.print(f"[dim]→ {shown[str(answer)]}[/]")
+                # 拒绝不回显：工具那行下面紧接着就是「⎿ 已拒绝」，以前两行说同一件事（给文档站拍截图时发现）
+                shown = dict(once="这次允许", always="本会话一直允许", persist="以后都允许（已写进配置）")
+                if answer in shown:
+                    c.print(f"[dim]→ {shown[str(answer)]}[/]")
                 return answer
             while True:  # 选择器用不了的终端：退回打字
                 answer = (
