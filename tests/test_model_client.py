@@ -70,6 +70,22 @@ OPENAI_STREAM = [
 ]
 
 
+def test_openai_usage_reports_cache_hits() -> None:
+    """OpenAI 协议各家报缓存命中的字段不一样，统一成 Anthropic 的口径（input_tokens 不含命中部分）。"""
+
+    def usage(u: str) -> dict[str, int]:
+        lines = [f'data: {{"choices":[],"usage":{u}}}', "data: [DONE]"]
+        return list(parse_openai_sse(iter(lines)))[-1].usage  # type: ignore[union-attr]
+
+    expect = {"input_tokens": 200, "output_tokens": 5, "cache_read_tokens": 800}
+    assert usage('{"prompt_tokens":1000,"completion_tokens":5,"prompt_tokens_details":{"cached_tokens":800}}') == expect
+    assert usage('{"prompt_tokens":1000,"completion_tokens":5,"prompt_cache_hit_tokens":800,'
+                 '"prompt_cache_miss_tokens":200}') == expect  # DeepSeek  # fmt: skip
+    assert usage('{"prompt_tokens":1000,"completion_tokens":5,"cached_tokens":800}') == expect  # Kimi
+    assert usage('{"prompt_tokens":10,"completion_tokens":5,"prompt_tokens_details":null}') == {
+        "input_tokens": 10, "output_tokens": 5}  # fmt: skip
+
+
 def test_openai_stream_accumulates_tool_calls_by_index() -> None:
     assert list(parse_openai_sse(iter(OPENAI_STREAM))) == [
         TextDelta("好的，"),

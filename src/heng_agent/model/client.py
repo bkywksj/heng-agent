@@ -163,6 +163,23 @@ def to_openai_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
 _FINISH = {"tool_calls": "tool_use", "stop": "end_turn", "length": "max_tokens"}
 
 
+def _openai_usage(u: dict[str, Any]) -> dict[str, int]:
+    """OpenAI 协议的用量换成和 Anthropic 一样的口径：input_tokens 只算没命中缓存的部分，命中的记在 cache_read_tokens。
+
+    OpenAI 协议的服务商大多自动缓存相同的前缀，但各家报的字段不一样：
+    OpenAI、通义在 prompt_tokens_details.cached_tokens，DeepSeek 在 prompt_cache_hit_tokens，
+    Kimi 在 cached_tokens。prompt_tokens 都是含命中部分的总数。
+    以前只读 prompt_tokens：命中了也看不出来，花费也全按原价算。"""
+    details = u.get("prompt_tokens_details") or {}
+    hit = details.get("cached_tokens") if isinstance(details, dict) else None
+    hit = int(hit or u.get("prompt_cache_hit_tokens") or u.get("cached_tokens") or 0)
+    total = int(u.get("prompt_tokens", 0))
+    usage = {"input_tokens": max(total - hit, 0), "output_tokens": int(u.get("completion_tokens", 0))}
+    if hit:
+        usage["cache_read_tokens"] = hit
+    return usage
+
+
 def parse_openai_sse(lines: Iterator[str]) -> Iterator[ModelEvent]:
     """OpenAI 流 → 模型事件。工具调用按 index 累积 id / name / arguments 分片，流结束时一次吐出。"""
     calls: dict[int, dict[str, str]] = {}
@@ -176,8 +193,7 @@ def parse_openai_sse(lines: Iterator[str]) -> Iterator[ModelEvent]:
             err = data["error"]
             raise ModelError(f"模型服务报错：{err.get('message', err) if isinstance(err, dict) else err}")
         if data.get("usage"):
-            usage = {"input_tokens": int(data["usage"].get("prompt_tokens", 0)),
-                     "output_tokens": int(data["usage"].get("completion_tokens", 0))}  # fmt: skip
+            usage = _openai_usage(data["usage"])
         for choice in data.get("choices") or []:
             delta = choice.get("delta") or {}
             # 推理模型的思考过程：DeepSeek / 通义在 reasoning_content，OpenRouter 在 reasoning。
