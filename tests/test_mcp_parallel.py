@@ -20,10 +20,13 @@ class FakeClient:
     def __init__(self, config: ServerConfig) -> None:
         self.config = config
         self.closed = False
+        self.span = (0.0, 0.0)  # 关闭从什么时候开始、到什么时候结束
 
     def close(self) -> None:
+        begin = time.perf_counter()
         time.sleep(DELAY)
         self.closed = True
+        self.span = (begin, time.perf_counter())
 
 
 def _configs() -> list[ServerConfig]:
@@ -65,9 +68,10 @@ def test_servers_connect_at_the_same_time(tmp_path: Path, slow_open: list[str]) 
 def test_servers_close_at_the_same_time(tmp_path: Path, slow_open: list[str]) -> None:
     manager = MCPManager(_configs(), tmp_path)
     clients = list(manager.clients.values())
-    start = time.perf_counter()
     manager.close()
-    assert time.perf_counter() - start < DELAY * 1.8  # 两个各 0.4 秒，排队要 0.8 秒
+    # 看两段关闭的时间有没有交叠：排队关的话后一个要等前一个关完才开始。以前比总用时（< 0.72 秒，排队 0.8 秒），
+    # GitHub 的 macOS 机器慢，0.724 秒挂过一次（0.5.0 发版时）
+    assert max(c.span[0] for c in clients) < min(c.span[1] for c in clients)
     assert all(c.closed for c in clients) and manager.clients == {}
     manager.close()  # 重复关不出错（界面和命令行入口退出时都会关）
 
