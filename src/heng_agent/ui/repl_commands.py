@@ -256,11 +256,15 @@ class CommandsMixin:
             return
         # 在界面线程里先取好快照：后台线程问的时候，正在进行的这一问可能还在往对话里加东西
         messages, system, history = list(a.messages), a.system_prompt(), list(self._btw_log)
+        tools = a.tool_specs()  # 和主对话前缀一致才吃得到缓存（见 ui/btw.py）
+        if hasattr(client, "effort"):  # 思考设置也一样：改了思考参数，对话部分的缓存就失效
+            client.thinking_budget = a.thinking_budget if a.thinking else 0
+            client.effort = a.effort
         c.print("[dim]旁支问题已发出：答完显示在这里，不打断正在进行的回答，也不进对话历史[/]")
 
         def work() -> None:
             try:
-                answer = btw.ask(client, system, messages, history, question)
+                answer = btw.ask(client, system, messages, history, question, tools=tools)
             except Exception as exc:  # 网络、服务报错：说一声，别让后台线程带着异常悄悄退出
                 logs.log.warning("/btw 出错：%s", exc)
                 self._btw_show(f"[red]旁支问题没问成：{escape(str(exc))}[/]")

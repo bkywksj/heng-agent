@@ -67,7 +67,8 @@ def test_btw_sees_conversation_uses_no_tools_and_stays_out_of_history(tmp_path: 
     repl.handle_command("/btw 刚才说的是哪个文件")
     _wait(lambda: repl._btw_log)
     messages, tools = client.calls[0]
-    assert tools == []  # 不带工具
+    # 带着主对话的工具声明（只为吃缓存，不执行）：以前传空列表，前缀对不上，整段对话每次按全价算
+    assert tools == repl.agent.tool_specs() and tools
     assert messages[0]["content"][0]["text"] == "我们在改购物车"  # 看得到之前的对话
     assert repl.agent.messages == before  # 不进对话历史
     assert repl._btw_log == [("刚才说的是哪个文件", "旁支的回答")]
@@ -122,3 +123,16 @@ def test_btw_during_turn_runs_at_once_without_interrupting(tmp_path: Path) -> No
     text = console.export_text()
     assert "旁支答好了" in text and "主回答" in text  # 两个都在，主回答没被打断
     assert all("顺便问一下" not in str(m) for m in repl.agent.messages)  # 旁支问题不进对话历史
+
+
+def test_btw_tool_call_is_not_run() -> None:
+    """模型还是去调了工具：不执行，回答后面注明一句。"""
+    from heng_agent.core.types import ToolCall
+
+    class Calls(Recorder):
+        def stream(self, system: str, messages: list[Any], tools: list[Any]) -> Any:
+            yield TextDelta("我先查一下")
+            yield ToolCall("t1", "glob", {"pattern": "*.py"})
+            yield TurnEnd("tool_use", {})
+
+    assert btw.ask(Calls(), "", [], [], "哪个文件") == f"我先查一下\n\n{btw.TOOL_NOTE}"
