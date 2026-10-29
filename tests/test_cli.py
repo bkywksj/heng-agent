@@ -238,3 +238,19 @@ def test_pinned_flag_from_cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     store = cli.new_session_store(settings, "zhima-tab-2", resuming=False)
     assert store is not None and store.pinned  # --session-id：固定
     assert cli.new_session_store(settings, None, resuming=False) is None
+
+
+def test_no_session_persistence(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                capsys: pytest.CaptureFixture[str]) -> None:  # fmt: skip
+    """--no-session-persistence：一次性的后台调用（智码生成提交信息等）不留会话记录。"""
+    from heng_agent.session import SessionStore
+
+    work = tmp_path / "w"
+    work.mkdir()
+    home = Path(os.environ["HENG_AGENT_HOME"])
+    monkeypatch.setattr(cli, "make_client", lambda profile, max_tokens: FakeModel([["feat: 加功能"]]))
+    assert cli.main(["--workdir", str(work), "--no-session-persistence", "-p", "生成提交信息"]) == 0
+    assert "feat: 加功能" in capsys.readouterr().out
+    assert SessionStore.all(home, work) == []  # 没有留下会话文件
+    assert cli.main(["--workdir", str(work), "--no-session-persistence", "--resume", "x", "-p", "y"]) == 1
+    assert "不保存会话" in capsys.readouterr().err

@@ -120,6 +120,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="接着这个目录最近的会话聊（同 --resume 不带 id）")  # fmt: skip
     p.add_argument("--session-id", default=None, metavar="id",
                    help="用指定的 id 开一个新会话（调用方预先分配 id，如智码）；id 已在用时报错")  # fmt: skip
+    p.add_argument("--no-session-persistence", action="store_true",
+                   help="不保存会话（一次性的后台调用用，如智码生成提交信息，不在会话列表里留记录）")  # fmt: skip
     p.add_argument("--sessions", action="store_true", help="列出这个目录的会话")
     p.add_argument("-w", "--worktree", default=None, metavar="名字",
                    help="在独立的 git 工作树里工作（分支 heng/名字），不碰主分支")  # fmt: skip
@@ -359,6 +361,12 @@ def _main(argv: list[str] | None = None) -> int:
             return 1
         return run_upgrade()
     args = build_parser().parse_args(argv)
+    if args.no_session_persistence and (args.resume is not None or args.session_id):  # 参数自相矛盾：先报，不先干活
+        print(
+            "错误：--no-session-persistence 是不保存会话，不能和 --resume / --continue / --session-id 一起用",
+            file=sys.stderr,
+        )
+        return 1
     if args.prompt == "" and args.initial:  # heng-agent "问题" -p：这句话就是 -p 的问题
         args.prompt, args.initial = args.initial, None
     if args.acp:  # 协议模式：服务商、目录等都由客户端按会话给，下面的交互式准备一概不做
@@ -441,7 +449,9 @@ def _main(argv: list[str] | None = None) -> int:
             settings.permission_mode,
             Rules(allow + split_rules(args.allowed_tools), deny + split_rules(args.disallowed_tools)),
         ),
-        session=session or new_store or SessionStore(settings.home, settings.workdir),
+        session=None
+        if args.no_session_persistence
+        else session or new_store or SessionStore(settings.home, settings.workdir),
         hooks=hooks,
     )
     if session is not None:
