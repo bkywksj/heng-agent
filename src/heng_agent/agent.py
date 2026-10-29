@@ -137,6 +137,8 @@ class Agent:
         self.last_input_tokens = 0  # 最近一次请求的输入 token：判断是否快撑满上下文
         #: 最近一次请求读到加写下的缓存 token：大于 0 说明这家服务确实在缓存，下一句建议就照主对话前缀发（ui/suggest）
         self.last_cache_tokens = 0
+        #: 最近一次请求（一次 API 调用）的用量；存进会话文件的 live，给智码等调用方的状态栏用
+        self.last_call_usage: dict[str, int] = dict.fromkeys(USAGE_KEYS, 0)
         #: 最近一次请求的输出速度（token/秒，从第一段输出到结束）；状态栏显示。没测到（太短、没用量）是 None
         self.last_speed: float | None = None
         self._turn_output_done, self._streamed = 0, 0.0
@@ -632,6 +634,7 @@ class Agent:
             self.last_input_tokens = sum(end.usage.get(k, 0) for k in ("input_tokens", "cache_read_tokens",
                                                                         "cache_write_tokens"))  # fmt: skip
             self.last_cache_tokens = end.usage.get("cache_read_tokens", 0) + end.usage.get("cache_write_tokens", 0)
+            self.last_call_usage = {k: end.usage.get(k, 0) for k in USAGE_KEYS}
             if not "".join(text).strip() and not calls and empty_retries < MAX_EMPTY_RETRIES:
                 # 空回复（没文字、也没调工具，常见的是只有一个空的思考块）：实测某些中转站偶尔这样。交互里看着像
                 # AI 没吭声，-p 脚本拿到空的 result 还以为成功了——重新请求一次（空回复不进历史、不算轮数；用量照记）
@@ -690,7 +693,13 @@ class Agent:
 
     def _save(self) -> None:
         if self.session is not None:
-            self.session.save(self.messages, self.usage, self.usage_by_model)
+            self.session.save(self.messages, self.usage, self.usage_by_model, self.live_status())
+
+    def live_status(self) -> dict[str, Any]:
+        """当前状态（存进会话文件的 live）：调用方（智码的状态栏用量条）读它显示上下文占用、最近一次请求的用量。
+        context_tokens 与界面判断要不要压缩用的是同一个数（没命中 + 命中缓存 + 写入缓存）。"""
+        return {"model": self.model_name, "context_tokens": self.last_input_tokens,
+                "context_window": self.context_window, "last_call": dict(self.last_call_usage)}  # fmt: skip
 
     @property
     def model_name(self) -> str:

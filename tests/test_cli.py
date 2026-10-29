@@ -272,3 +272,26 @@ def test_piped_stdin_utf8_on_gbk_console(monkeypatch: pytest.MonkeyPatch) -> Non
     gbk = "中文日志".encode("gbk")  # 不是合法 UTF-8：按系统编码解，不报错
     monkeypatch.setattr("sys.stdin", Piped(io.BytesIO(gbk), encoding="gbk"))
     assert isinstance(cli.read_piped_stdin(), str)
+
+
+def test_session_file_has_live_status(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """会话文件里的 live：模型、上下文占用与窗口、最近一次请求的用量——智码状态栏的用量条读它。"""
+    import json as _json
+
+    from heng_agent.session import SessionStore
+
+    work = tmp_path / "w"
+    work.mkdir()
+    home = Path(os.environ["HENG_AGENT_HOME"])
+    monkeypatch.setattr(cli, "make_client", lambda profile, max_tokens: FakeModel([["好"]]))
+    assert cli.main(["--workdir", str(work), "--session-id", "tab-1", "-p", "你好"]) == 0
+    data = _json.loads(SessionStore(home, work, "tab-1").path.read_text(encoding="utf-8"))
+    live = data["live"]
+    assert live["context_tokens"] == 10  # 假模型每次请求报 input 10、output 5
+    assert live["last_call"]["input_tokens"] == 10 and live["last_call"]["output_tokens"] == 5
+    assert live["context_window"] > 0 and isinstance(live["model"], str)
+    # 🔴 对外的约定：indent=1、顶层字段「换行 + 恰好一个空格」开头，workdir 在 messages 前、live 在后——
+    # 智码远程只拉头几 KB / 尾几 KB 认顶层字段（见 docs/integration/智码对接.md），改了存盘格式这里要先过
+    raw = SessionStore(home, work, "tab-1").path.read_text(encoding="utf-8")
+    assert '\n "workdir": ' in raw and '\n "live": ' in raw
+    assert raw.index('\n "workdir": ') < raw.index('\n "messages": ') < raw.index('\n "live": ')

@@ -66,7 +66,11 @@ class SessionStore:
         return archived
 
     def save(
-        self, messages: list[Message], usage: dict[str, int], usage_by_model: dict[str, dict[str, int]] | None = None
+        self,
+        messages: list[Message],
+        usage: dict[str, int],
+        usage_by_model: dict[str, dict[str, int]] | None = None,
+        live: dict[str, Any] | None = None,
     ) -> None:
         self.dir.mkdir(parents=True, exist_ok=True)
         data: dict[str, Any] = {"format": SESSION_FORMAT, "workdir": str(self.workdir), "messages": messages,
@@ -75,6 +79,8 @@ class SessionStore:
             data["usage_by_model"] = usage_by_model  # /stats 按模型统计、按各自的价格算钱
         if self.title:
             data["title"] = self.title
+        if live:
+            data["live"] = live  # 当前状态（模型、上下文占用与窗口、最近一次请求的用量），见 Agent.live_status
         tmp = self.path.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
         tmp.replace(self.path)
