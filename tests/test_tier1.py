@@ -67,6 +67,9 @@ def test_cache_usage_parsed_and_counted(tmp_path: Path) -> None:
     profile = Profile(protocol="anthropic", base_url="http://x", model="m", price_in=10, price_out=50)
     money = profile.cost(agent.usage)
     assert money == pytest.approx((12 + 4000 * 0.1 + 300 * 1.25) * 10 / 1e6 + 3 * 50 / 1e6)
+    # 缓存价格各家不同（OpenAI 协议多是 1/10～1/2、写入不另收钱）：填了就按填的算
+    own = profile.model_copy(update={"price_cache_read": 5, "price_cache_write": 0})
+    assert own.cost(agent.usage) == pytest.approx((12 * 10 + 4000 * 5 + 300 * 0) / 1e6 + 3 * 50 / 1e6)
 
 
 def test_prompt_cache_can_be_turned_off() -> None:

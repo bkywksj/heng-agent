@@ -56,6 +56,14 @@ class Profile(BaseModel):
     # 在配置文件里按控制台的价格填，/cost 就会显示金额
     price_in: float | None = Field(default=None, ge=0, description="输入价格：每百万 token")
     price_out: float | None = Field(default=None, ge=0, description="输出价格：每百万 token")
+    # 缓存命中、写入的价格各家折扣不同（Anthropic 读 0.1 倍、写 1.25 倍；
+    # OpenAI 协议的各家多是 1/10～1/2、写入不另收钱），不填就按 Anthropic 的倍数从 price_in 算
+    price_cache_read: float | None = Field(
+        default=None, ge=0, description="读缓存（命中）价格：每百万 token；不填按输入价的 0.1 倍"
+    )
+    price_cache_write: float | None = Field(
+        default=None, ge=0, description="写缓存价格：每百万 token；不填按输入价的 1.25 倍"
+    )
     currency: str = "元"
     prompt_cache: bool = Field(
         default=True, description="Anthropic 协议开启提示缓存：系统提示词与历史只按 0.1 倍计价（写入时 1.25 倍）"
@@ -74,16 +82,16 @@ class Profile(BaseModel):
     def cost(self, usage: dict[str, int]) -> float | None:
         """按配置的价格算花费；没配价格返回 None。
 
-        开了提示缓存时 input_tokens 只是没命中的部分：读缓存按输入价 0.1 倍、写缓存按 1.25 倍另算（Anthropic 定价）。
+        input_tokens 只是没命中缓存的部分：读缓存、写缓存另按 price_cache_read / price_cache_write 算，
+        没填就按输入价的 0.1 倍、1.25 倍（Anthropic 定价）。
         """
         if self.price_in is None or self.price_out is None:
             return None
-        tokens_in = (
-            usage.get("input_tokens", 0)
-            + usage.get("cache_read_tokens", 0) * CACHE_READ_RATE
-            + usage.get("cache_write_tokens", 0) * CACHE_WRITE_RATE
-        )
-        return (tokens_in * self.price_in + usage.get("output_tokens", 0) * self.price_out) / 1e6
+        read = self.price_cache_read if self.price_cache_read is not None else self.price_in * CACHE_READ_RATE
+        write = self.price_cache_write if self.price_cache_write is not None else self.price_in * CACHE_WRITE_RATE
+        money_in = (usage.get("input_tokens", 0) * self.price_in + usage.get("cache_read_tokens", 0) * read
+                    + usage.get("cache_write_tokens", 0) * write)  # fmt: skip
+        return (money_in + usage.get("output_tokens", 0) * self.price_out) / 1e6
 
     def resolve_key(self) -> str | None:
         """现取现用，不缓存：避免密钥被序列化进会话或日志。"""
