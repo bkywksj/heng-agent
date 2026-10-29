@@ -254,3 +254,21 @@ def test_no_session_persistence(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     assert SessionStore.all(home, work) == []  # 没有留下会话文件
     assert cli.main(["--workdir", str(work), "--no-session-persistence", "--resume", "x", "-p", "y"]) == 1
     assert "不保存会话" in capsys.readouterr().err
+
+
+def test_piped_stdin_utf8_on_gbk_console(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Windows 中文系统上 sys.stdin 按 GBK 解码：别的程序送来的 UTF-8 中文以前会变乱码，现在按字节先当 UTF-8 解。"""
+    import io
+
+    class Piped(io.TextIOWrapper):
+        def isatty(self) -> bool:
+            return False
+
+    text = "【用户】\n把包邮门槛改成 88\n"
+    monkeypatch.setattr("sys.stdin", Piped(io.BytesIO(text.encode("utf-8")), encoding="gbk"))
+    assert cli.read_piped_stdin() == text
+    monkeypatch.setattr("sys.stdin", Piped(io.BytesIO(b"\xef\xbb\xbf" + text.encode("utf-8")), encoding="gbk"))
+    assert cli.read_piped_stdin() == text  # 带 BOM 的也去掉
+    gbk = "中文日志".encode("gbk")  # 不是合法 UTF-8：按系统编码解，不报错
+    monkeypatch.setattr("sys.stdin", Piped(io.BytesIO(gbk), encoding="gbk"))
+    assert isinstance(cli.read_piped_stdin(), str)

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import json
+import locale
 import os
 import platform
 import re
@@ -236,13 +237,24 @@ def undo_msys_pathconv(prompt: str, command_names: set[str]) -> str:
 
 
 def read_piped_stdin() -> str:
-    """管道传进来的内容（`cat 日志 | heng-agent -p "分析"`）；直接在终端里运行（没有管道）时返回空。"""
+    """管道传进来的内容（`cat 日志 | heng-agent -p "分析"`）；直接在终端里运行（没有管道）时返回空。
+
+    按字节读、先当 UTF-8 解（去掉 BOM）：Windows 上 sys.stdin 按系统代码页（中文系统是 GBK）解码，
+    别的程序（智码、Git Bash 的 cat、Node）送来的 UTF-8 中文会变成乱码。不是合法 UTF-8 再按系统编码解
+    （PowerShell 5.1 等按代码页输出的）。"""
     try:
         if sys.stdin is None or sys.stdin.isatty():
             return ""
-        return sys.stdin.read()
+        buffer = getattr(sys.stdin, "buffer", None)
+        if buffer is None:  # 被替换成纯文本流（测试等）：没有字节可读，照原样读
+            return sys.stdin.read()
+        data = buffer.read()
     except (OSError, ValueError):  # 标准输入被关掉或被别处接管（如测试框架）
         return ""
+    try:
+        return data.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return data.decode(locale.getpreferredencoding(False), errors="replace")
 
 
 def split_rules(values: list[str]) -> list[str]:
