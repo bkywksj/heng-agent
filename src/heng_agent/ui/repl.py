@@ -325,7 +325,7 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin, Tu
         if profile is None:
             return
         agent, messages = self.agent, list(self.agent.messages)
-        request = suggest.plan(profile, agent.system_prompt(), messages, agent.tool_specs())
+        request = suggest.plan(agent.system_prompt(), messages, agent.tool_specs(), agent.last_cache_tokens > 0)
         if request is None:
             return
 

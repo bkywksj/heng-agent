@@ -135,6 +135,8 @@ class Agent:
         self.usage: dict[str, int] = dict.fromkeys(USAGE_KEYS, 0)
         self.usage_by_model: dict[str, dict[str, int]] = {}  # 模型名 → 用量（存进会话文件，/stats 按模型统计）
         self.last_input_tokens = 0  # 最近一次请求的输入 token：判断是否快撑满上下文
+        #: 最近一次请求读到加写下的缓存 token：大于 0 说明这家服务确实在缓存，下一句建议就照主对话前缀发（ui/suggest）
+        self.last_cache_tokens = 0
         #: 最近一次请求的输出速度（token/秒，从第一段输出到结束）；状态栏显示。没测到（太短、没用量）是 None
         self.last_speed: float | None = None
         self._turn_output_done, self._streamed = 0, 0.0
@@ -629,6 +631,7 @@ class Agent:
             # 只看它会严重低估，该自动压缩时不压缩，最后撑爆上下文
             self.last_input_tokens = sum(end.usage.get(k, 0) for k in ("input_tokens", "cache_read_tokens",
                                                                         "cache_write_tokens"))  # fmt: skip
+            self.last_cache_tokens = end.usage.get("cache_read_tokens", 0) + end.usage.get("cache_write_tokens", 0)
             if not "".join(text).strip() and not calls and empty_retries < MAX_EMPTY_RETRIES:
                 # 空回复（没文字、也没调工具，常见的是只有一个空的思考块）：实测某些中转站偶尔这样。交互里看着像
                 # AI 没吭声，-p 脚本拿到空的 result 还以为成功了——重新请求一次（空回复不进历史、不算轮数；用量照记）

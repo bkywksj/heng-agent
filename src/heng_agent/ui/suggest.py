@@ -2,12 +2,14 @@
 
 - 在后台线程里问，用单独建的模型客户端（不和下一问抢同一个连接）；只要一句短话；
 - 没有明显的下一步就不给，宁缺毋滥：给了一句不着边的，比不给更打扰；
-- 每一问多一次请求，按能不能吃到提示缓存分两种发法（见 plan）：
-  - Anthropic 协议且开着提示缓存：和主对话的请求**前缀一模一样**（同样的系统提示词、工具声明、思考设置、整段对话），
-    只在末尾多一条要求——前面整段读主对话刚写下的缓存，按 0.1 倍计价（Claude Code 也是这么做的）。
+- 每一问多一次请求，按主对话上一次请求**实际有没有读写缓存**分两种发法（见 plan）。不按协议猜：
+  Anthropic 协议的中转站有的根本不缓存（实测 yongye 读写都是 0），OpenAI 协议的 DeepSeek、OpenAI、通义反而会自动缓存；
+  - 有缓存：和主对话的请求**前缀一模一样**（同样的系统提示词、工具声明、思考设置、整段对话），只在末尾多一条要求，
+    前面整段读主对话刚写下的缓存（Claude Code 也是这么做的）。
     工具不能靠拿掉来禁用：缓存按 工具 → 系统提示词 → 消息 的顺序比前缀，少了工具声明后面全部对不上、按全价算；
-  - 别的情况（OpenAI 协议、关了缓存）没有缓存可吃：只带最近几问、压成一段文字，配一句短的系统提示词，
-    每次几千 token 以内，不随对话变长而上涨。
+  - 没缓存：只带最近几问、压成一段文字，配一句短的系统提示词，每次几千 token 以内，不随对话变长而上涨。
+    实测 DeepSeek（OpenAI 协议）：照前缀发 读缓存 14848、新输入 212、输出 11；只带最近几问 新输入 281，
+    但模型先推理了几百 token（输出 441～721）——有缓存时照前缀发反而更省，也看得到整段对话。
 - 每次的用量记进日志（读了多少缓存、新算了多少输入），命中没命中看日志就知道。
 """
 
@@ -48,15 +50,16 @@ class Plan:
     cached: bool = False  # 是不是照着主对话的前缀发（吃缓存）
 
 
-def plan(profile: Any, system: str, messages: list[Message], tools: list[dict[str, Any]]) -> Plan | None:
-    """按服务商挑发法；上一条不是助手的回复（这一问出错、被打断）返回 None：不问。
+def plan(system: str, messages: list[Message], tools: list[dict[str, Any]], cache_works: bool) -> Plan | None:
+    """挑发法；上一条不是助手的回复（这一问出错、被打断）返回 None：不问。
 
-    system、tools 是主对话这一问用的（agent.system_prompt()、agent.tool_specs()），吃缓存时原样带上。"""
+    system、tools 是主对话这一问用的（agent.system_prompt()、agent.tool_specs()），吃缓存时原样带上；
+    cache_works：主对话最近一次请求读到或写下了缓存（agent.last_cache_tokens > 0）。"""
     msgs = btw.snapshot(messages)
     if not msgs or msgs[-1].get("role") != "assistant":
         return None
     ask_block = {"role": "user", "content": [{"type": "text", "text": INSTRUCTION}]}
-    if getattr(profile, "protocol", "") == "anthropic" and getattr(profile, "prompt_cache", False):
+    if cache_works:
         return Plan(system, [*msgs, ask_block], tools, cached=True)
     brief = {"role": "user", "content": [{"type": "text", "text": f"{transcript(msgs)}\n\n{INSTRUCTION}"}]}
     return Plan(BRIEF_SYSTEM, [brief])
