@@ -319,3 +319,15 @@ def test_memory_overview(settings: Settings) -> None:
     assert "说明文件偏大" in shown and "@AGENTS.md" in shown  # 合计超过 1 万 token：提醒，并给出合并的办法
     target = shown[shown.index("写到哪里") :].split("/memory edit user")[0]  # 路径长时这一行会折行：按文字取
     assert "AGENTS.md" in target  # # 快速记忆写进现有的 AGENTS.md
+
+
+def test_banner_hints_fit_80_columns(settings: Settings) -> None:
+    """欢迎页的按键提示、/init 提示每行不超过 80 列：rich 只在空格处断行，中英混排的长句超了会把后半截整段挪到下一行，
+    84 列的窗口里实测在 60 列处就折了（给文档站拍截图时发现）。"""
+    from rich.cells import cell_len
+
+    console = Console(record=True, width=200, force_terminal=False)
+    Repl(Agent(settings, FakeModel([])), console=console).banner()
+    hints = [ln.rstrip() for ln in console.export_text().splitlines() if ln.startswith("✦") or "/init" in ln]
+    assert len(hints) == 3  # 两行按键提示 + 没有项目说明时的 /init 提示
+    assert all(cell_len(ln) <= 80 for ln in hints), [(cell_len(ln), ln) for ln in hints]

@@ -738,12 +738,14 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin, Tu
         )
         body += "\n".join(f"[bold]{k:<4}[/] {v}" for k, v in rows)
         self.console.print(Panel(body, border_style=color, padding=(1, 2)))
-        # 按键提示只在这里说一次（以前还写在输入框的上边框上，每次都在，用户觉得不好看）；全的在 /help
+        # 按键提示只在这里说一次（以前还写在输入框的上边框上，每次都在，用户觉得不好看）；全的在 /help。
+        # 每行不超过 80 列（test_banner_hints_fit_80_columns）：rich 只在空格处断行，
+        # 中英混排的长句会把后半截整段挪到下一行，84 列的窗口里实测在 60 列处就折了，右边空一大块
         self.console.print(
-            "[cyan]✦[/] [dim]@文件 附上内容 · !命令 直接执行 · / 补全命令 · Shift+Enter 换行 · Alt+V 粘贴图片[/]"
+            "[cyan]✦[/] [dim]@文件 附上内容 · !命令 直接执行 · / 补全命令 · Shift+Enter 换行 · Alt+V 贴图[/]"
         )
         self.console.print(
-            "[cyan]✦[/] [dim]Shift+Tab 切换权限模式 · ESC 中断 · 回答中也能接着输入（Enter 排队）· /help 看全部[/]"
+            "[cyan]✦[/] [dim]Shift+Tab 切换模式 · ESC 中断 · 回答中接着打字、Enter 排队 · /help 看全部[/]"
         )
         for line in mcp_view.startup_line(self):  # 每个服务一行，最后一行汇总
             self.console.print(line)
@@ -759,9 +761,7 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin, Tu
             self.console.print(f"[dim]兼容加载：{escape('、'.join(compat))}[/]")
         if not any((self.agent.settings.workdir / name).is_file() for name in PROJECT_MEMORY_NAMES):
             # 用户不知道有 /init 就不会用：项目还没有说明时提一句（有了就不再提）
-            self.console.print(
-                "[dim]首次在这个项目里用？输入 /init 让 AI 先熟悉项目（生成 AGENTS.md，以后每次对话都会读）[/]"
-            )
+            self.console.print("[dim]首次在这个项目里用？输入 /init，让 AI 先熟悉项目、写好 AGENTS.md（每次都会读）[/]")
 
     def compat_items(self) -> list[str]:
         """从别的编码工具兼容加载了哪些配置（欢迎页与 /doctor 显示）：读了什么要让用户看得见。"""
