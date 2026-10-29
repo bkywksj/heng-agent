@@ -47,10 +47,23 @@ class SessionStore:
         self.workdir = workdir
         self.title = ""  # 会话名：存在会话文件里，/resume 列表里显示、可以按它搜
         self.usage_by_model: dict[str, dict[str, int]] = {}  # 按模型分的用量（载入旧会话时从文件读出）
+        # 会话 id 是调用方明确指定的（--session-id、--resume <id>）：/clear 时 id 不变、旧对话另存——
+        # 智码这类调用方按 id 记着这个会话（标签页 ↔ id），换了 id 它下次打开就接到 /clear 之前的旧对话上
+        self.pinned = False
 
     @property
     def path(self) -> Path:
         return self.dir / f"{self.id}.json"
+
+    def archive(self) -> str | None:
+        """把当前对话另存成一个新 id（文件改名），自己的 id 不变、留给接下来的新对话。没存过盘返回 None。"""
+        if not self.path.exists():
+            return None
+        archived = new_session_id()
+        self.path.replace(self.dir / f"{archived}.json")
+        self.title = ""
+        self.usage_by_model = {}
+        return archived
 
     def save(
         self, messages: list[Message], usage: dict[str, int], usage_by_model: dict[str, dict[str, int]] | None = None

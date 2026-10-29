@@ -199,3 +199,42 @@ def test_initial_prompt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
     work.mkdir()
     assert cli.main(["--workdir", str(work), "问一句", "-p"]) == 0
     assert "问一句" in str(model.calls[0])
+
+
+def test_clear_keeps_pinned_session_id(tmp_path: Path) -> None:
+    """--session-id / --resume <id> 指定的会话：/clear 时 id 不变（智码按 id 记着标签页），旧对话另存成新 id。"""
+    import json as _json
+
+    from heng_agent.agent import Agent
+    from heng_agent.core.config import Settings
+    from heng_agent.session import SessionStore
+    from heng_agent.ui.repl import Repl
+
+    home = tmp_path / "h"
+    agent = Agent(Settings(workdir=tmp_path, home=home), FakeModel([]))
+    pinned = SessionStore(home, tmp_path, "zhima-tab-1")
+    pinned.pinned = True
+    pinned.title = "包邮改造"
+    agent.session = pinned
+    agent.messages = [{"role": "user", "content": [{"type": "text", "text": "把门槛改成 88"}]}]
+    pinned.save(agent.messages, agent.usage)
+    Repl(agent).handle_command("/clear")
+    assert agent.session is pinned and agent.session.id == "zhima-tab-1"  # id 不变
+    assert not pinned.path.exists() and agent.messages == [] and pinned.title == ""
+    archived = [s for s in SessionStore.all(home, tmp_path) if s.id != "zhima-tab-1"]
+    assert len(archived) == 1 and archived[0].first_question == "把门槛改成 88"  # 旧对话还在，能 --resume 找回
+    assert _json.loads((pinned.dir / f"{archived[0].id}.json").read_text(encoding="utf-8"))["title"] == "包邮改造"
+
+    plain = Agent(Settings(workdir=tmp_path, home=home), FakeModel([]))
+    before = plain.session.id if plain.session else None
+    Repl(plain).handle_command("/clear")
+    assert plain.session is not None and plain.session.id != before  # 没指定 id 的：照旧开新会话
+
+
+def test_pinned_flag_from_cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from heng_agent.core.config import Settings
+
+    settings = Settings(workdir=tmp_path, home=tmp_path / "h")
+    store = cli.new_session_store(settings, "zhima-tab-2", resuming=False)
+    assert store is not None and store.pinned  # --session-id：固定
+    assert cli.new_session_store(settings, None, resuming=False) is None

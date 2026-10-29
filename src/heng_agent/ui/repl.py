@@ -879,8 +879,14 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin, Tu
             a.usage = dict.fromkeys(a.usage, 0)
             a.usage_by_model = {}
             a.last_input_tokens = 0
-            a.session = SessionStore(a.settings.home, a.settings.workdir)
-            c.print(f"已开始新会话 {a.session.id}")
+            if a.session is not None and a.session.pinned:
+                # 会话 id 是调用方指定的（如智码按 id 记着这个标签页）：id 不变，旧对话另存成新 id，还能 --resume 找回
+                archived = a.session.archive()
+                kept = f"，之前的对话另存为 {archived}（--resume {archived} 找回）" if archived else ""
+                c.print(f"已清空对话（会话 id 不变：{a.session.id}{kept}）")
+            else:
+                a.session = SessionStore(a.settings.home, a.settings.workdir)
+                c.print(f"已开始新会话 {a.session.id}")
         elif cmd == "/mode":
             mode = rest
             if mode not in MODES:  # 不带参数（或写错了）：方向键选

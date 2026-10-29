@@ -193,6 +193,7 @@ def new_session_store(settings: Settings, session_id: str | None, *, resuming: b
     store = SessionStore(settings.home, settings.workdir, session_id)
     if store.path.exists():
         raise AgentError(f"会话 id「{session_id}」已经在用了：接着聊请用 --resume {session_id}")
+    store.pinned = True  # 调用方指定的 id：/clear 时 id 不变（见 SessionStore.pinned）
     return store
 
 
@@ -392,6 +393,8 @@ def _main(argv: list[str] | None = None) -> int:
                 if args.resume
                 else SessionStore.latest(settings.home, settings.workdir)
             )
+            if args.resume and session is not None:
+                session.pinned = True  # 按 id 接着聊：/clear 时 id 不变（见 SessionStore.pinned）
         new_store = new_session_store(settings, args.session_id, resuming=args.resume is not None)
     except AgentError as exc:
         print(f"错误：{exc}", file=sys.stderr)
