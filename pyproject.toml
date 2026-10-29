@@ -33,6 +33,14 @@ dependencies = [
     "agent-client-protocol>=0.12.1,<0.13",  # ACP（--acp 模式）：0.x 次版本可能不兼容，测过再升
 ]
 
+# PyPI 页面左侧的链接（以前没写，从 PyPI 找不到源码与更新日志）。文档站上线后加 Documentation
+[project.urls]
+Homepage = "https://github.com/bkywksj/heng-agent"
+Repository = "https://github.com/bkywksj/heng-agent"
+"Gitee 镜像" = "https://gitee.com/bkywksj/heng-agent"
+Changelog = "https://github.com/bkywksj/heng-agent/blob/master/CHANGELOG.md"
+Issues = "https://github.com/bkywksj/heng-agent/issues"
+
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.6"]
 
