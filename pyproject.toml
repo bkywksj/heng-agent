@@ -9,7 +9,7 @@ description = "中文优先的终端编码智能体：读代码、改代码、�
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
-authors = [{ name = "抓蛙师" }]
+authors = [{ name = "湛江市麻章区湖光镇若依科技工作室" }, { name = "抓蛙师" }]
 keywords = ["ai", "agent", "coding-agent", "cli", "claude-code", "deepseek", "llm"]
 classifiers = [
     "Development Status :: 4 - Beta",
