@@ -356,6 +356,9 @@ heng-agent -p "跑测试" --output-format stream-json      # 每个事件一行 
   **bash 命令造成的改动（删文件、git 操作、构建产物）无法撤销**。
 - **花费**：在配置档里填 `price_in` / `price_out`（每百万 token 的价格，按服务商控制台填）和 `currency`，
   `/cost` 就按金额显示。预设不带价格：各家常调价，写死容易显示错的数。
+  命中缓存的部分另算：`price_cache_read` / `price_cache_write`（每百万 token），不填按输入价的 0.1 倍 / 1.25 倍
+  （Anthropic 的定价）。走 OpenAI 协议的服务商（DeepSeek、通义、Kimi、OpenAI）大多也自动缓存，但折扣各不相同、
+  写入一般不另收钱，按控制台填上 `price_cache_read`、`price_cache_write` 填 0，金额才准。
 - **读网页**（`web_fetch` 工具）：除 `auto` 模式外都会先问你，网址完整显示——模型可能把代码内容拼进网址带出去。
 - 回复按 Markdown 渲染（代码块、列表、表格），边生成边成形。
 - **自动重试**：限流（429）、过载（529）、服务端错误、网络中断时自动重试，最多 4 次，界面上会提示。
