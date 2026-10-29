@@ -23,14 +23,19 @@ description: |
 1. **先确认没有别的会话在改**：`git status`、`git log --oneline -5`；
 2. **改版本号两处，再更新锁文件**：`pyproject.toml` 的 `version`、`src/heng_agent/__init__.py` 的 `__version__`，
    然后运行 `uv lock`（uv.lock 里记着本项目的版本）、再 `uv sync --extra dev`（不加 --extra 会把 pytest、ruff 卸掉）。
-   版本号规则：修 bug 加最后一位（0.2.1），加功能加中间一位（0.3.0）；
+   版本号规则：修 bug 加最后一位（0.2.1），加功能加中间一位（0.3.0）。
+   `uv sync` 报 `heng-agent.exe` 被占用（os error 32）= 有 heng-dev 窗口开着（它跑的就是 `.venv` 里的那个 exe）：
+   请用户关掉再补跑。环境不会坏（代码从源码加载），只是安装记录停在旧版本号；
 3. **写 CHANGELOG.md**：最上面加一节（`## x.y.z（日期）`），按「交互 / 扩展 / 兼容 / 安全 / 修复」分类写用户看得见的变化。
    `tests/test_version.py` 检查四处一致：两处版本号、uv.lock、CHANGELOG 最新一节——漏了哪个测试就挂（以前 uv.lock 一直没人改）；
 4. **检查**：`ruff format`、`ruff check`、全部测试通过；
 5. **提交并打标签**：逐个 `git add`，提交信息「发布 x.y.z」；`git tag -a vx.y.z -m "…"`；
 6. **推送**：Sigil 的 `git_push`，分支与标签各推一次、两个远程：`origin`（GitHub，凭据 `github1`）与 `gitee`（Gitee 镜像，凭据 `gitee`）。
    **推到 GitHub 的标签会触发自动发布**（`.github/workflows/release.yml`）：三个平台跑完测试 → 核对标签与版本号 →
-   构建 → 发布到 PyPI → 建 GitHub Release（说明取自 CHANGELOG.md 这个版本的那一节）；
+   构建 → 发布到 PyPI → 建 GitHub Release（说明取自 CHANGELOG.md 这个版本的那一节）。
+   用 `github_runs_list`（branch 传标签名）/ `github_run_jobs` 盯到全绿。**有一个测试任务挂了，构建与发布就整个跳过**：
+   先 `github_download_run_logs` 看是哪条——计时类测试在慢机器上偶尔超（0.5.0 时 macOS 上超了 4 毫秒），
+   确认和改动无关就 `github_rerun_failed_jobs` 重跑，标签不用动；顺手把那条测试改稳（只进 master）；
 7. **构建并装成正式版**（在干净的标签副本里构建，别在工作目录——那样会把没提交的改动也装进去）：
 
    ```bash
@@ -48,6 +53,17 @@ description: |
    ```
 
    再用 uv 工具目录里的 Python 确认：代码在 site-packages、`prompts/` 里的内置提示词都在（以前漏打包，装好就崩）。
+
+9. **看 PyPI**：`https://pypi.org/pypi/heng-agent/x.y.z/json` 有 whl 与 tar.gz 就是发上去了（不带版本号的
+   `/pypi/heng-agent/json` 有缓存，刚发完还显示上一版，别被它吓到）。PyPI 页面的说明 = 发版那一刻的 README，
+   作者、左侧链接 = `pyproject.toml` 的 `authors`、`[project.urls]`——发出去就改不了，要改只能等下一版；
+10. **同步文档站**（`E:\my\AI模型\heng-agent-docs`，Astro；它自己的 CLAUDE.md 有验证门与提交规范）：
+    - `src/site.config.ts` 的 `version`（页头、首页徽章、指南「适用版本」都取它）；
+    - `src/data/commands.json`（命令与快捷键速查）对照 `ui/prompt.py` 的 `BUILTIN_HELP` 与 `ui/repl.py` 的 `HELP`：
+      新命令、改了用法的命令、改了的按键；
+    - 这一版 CHANGELOG 里的新功能，在指南里有没有地方讲；界面变了的，截图与终端示意图要重拍 / 重画；
+    - `src/data/faq.json` 里和这一版矛盾的说法；页脚、关于页的版权人和 `NOTICE` 一致；
+    - 文档站以前完全靠手写，0.3.0 之后三个版本都没跟上（2026-10-29 查出来的）：这一步别跳过。
 
 ## heng-dev 命令
 
