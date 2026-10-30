@@ -11,15 +11,19 @@ set -eu
 
 MIRROR="https://pypi.tuna.tsinghua.edu.cn/simple"
 SPEC="${HENG_AGENT_SPEC:-heng-agent}"
+# 原来的 PATH：第 1 步为了找到刚装的 uv 会把 ~/.local/bin 加进本脚本的 PATH，第 4 步要拿原来的判断「加没加过」
+ORIG_PATH="$PATH"
 
 say() { printf '%s\n' "$*"; }
 
 say "heng-agent 安装"
 
 # 1. uv（Python 的包管理工具，会自动准备好 Python，用户不用自己装 Python）
+#    UV_NO_MODIFY_PATH=1：uv 自己的安装器默认把 PATH 写进它认得的**所有** shell 的配置——没有的还新建
+#    （只用 bash 的机器上会凭空多出 ~/.zshrc、~/.config/fish/）。PATH 统一交给第 4 步，只改当前在用的 shell。
 if ! command -v uv >/dev/null 2>&1; then
     say "· 没找到 uv，先装 uv……"
-    if ! curl -LsSf https://astral.sh/uv/install.sh | sh; then
+    if ! curl -LsSf https://astral.sh/uv/install.sh | env UV_NO_MODIFY_PATH=1 sh; then
         say "装 uv 失败。可以手动安装后再运行本脚本：https://docs.astral.sh/uv/getting-started/installation/"
         say "（有 Python 的话也可以：pip install uv -i $MIRROR）"
         exit 1
@@ -48,9 +52,12 @@ fi
 say "· 安装 $SPEC ……"
 uv tool install --force "$@" "$SPEC"
 
-# 4. 命令目录加进 PATH（已经在了就什么都不做；HENG_AGENT_NO_MODIFY_PATH=1 跳过，测试与 CI 用）
+# 4. 命令目录加进当前 shell 的 PATH（已经在了就什么都不做；HENG_AGENT_NO_MODIFY_PATH=1 跳过，测试与 CI 用）。
+#    用原来的 PATH 跑：第 1 步往本脚本的 PATH 里加过 ~/.local/bin，uv 看到「已经在 PATH 里」就不写配置——
+#    新开的终端会找不到 heng-agent（Ubuntu 自带的 .profile 碰巧会加 ~/.local/bin，macOS 的 zsh 就不会）。
 if [ -z "${HENG_AGENT_NO_MODIFY_PATH:-}" ]; then
-    uv tool update-shell >/dev/null 2>&1 || true
+    UV_BIN="$(command -v uv)"
+    PATH="$ORIG_PATH" "$UV_BIN" tool update-shell >/dev/null 2>&1 || true
 fi
 
 say ""
