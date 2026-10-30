@@ -10,6 +10,19 @@
 5. 本机的正式版升级：关掉所有 heng-agent 窗口后运行 `heng-agent upgrade`（或重新运行一键安装脚本）；
    `heng-agent --version` 应显示新版本号（不带 -dev）。
 
+## 0.7.0（2026-10-30）
+
+MCP 服务可以停用（智码设置页的停用开关靠它生效）；一键安装不再给没在用的 shell 写配置，新开的终端一定找得到 heng-agent。
+
+- **扩展**：
+  - **MCP 服务可以停用**：配置里写 `"disabled": true`（Kimi、Cursor 的写法）或 `"enabled": false` 的服务不加载。
+    智码设置页 heng-agent 的 MCP 管理面板有启用 / 停用开关，以前 heng-agent 不认这个字段，停用了照样加载。
+- **修复**：
+  - **一键安装（macOS / Linux）不再给没在用的 shell 新建配置**：以前 uv 的安装器会把 PATH 写进它认得的所有 shell，
+    只用 bash 的机器上凭空多出 `~/.zshrc`、`~/.config/fish/`；现在只改正在用的 shell 的配置（bash 是 `~/.bashrc`、`~/.profile`）；
+  - **装好后新开的终端找不到 heng-agent**（交互式 shell、macOS 的 zsh）：把命令目录加进 PATH 的那一步一直没起作用，
+    以前被上一条的乱写掩盖了。
+
 ## 0.6.0（2026-10-29）
 
 接入智码：智码可以预先分配会话 id、带一句话开会话、在后台一次性调用不留记录，/clear 不再让智码的标签页对不上；会话文件记下上下文占用，智码状态栏的用量条能显示。回答中 Ctrl+X Ctrl+S 立刻发送。修好中文 Windows 上管道传进来的中文变乱码。

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "heng-agent"
-version = "0.6.0"
+version = "0.7.0"
 description = "中文优先的终端编码智能体：读代码、改代码、跑命令；支持 DeepSeek、Kimi、通义、GLM、Claude 等，兼容 Claude Code 配置"
 readme = "README.md"
 license = "Apache-2.0"
