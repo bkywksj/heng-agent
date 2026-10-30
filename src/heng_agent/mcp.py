@@ -85,6 +85,9 @@ def _read_servers(path: Path, source: str) -> list[ServerConfig]:
     # 也认 mcpServers（Claude Code、Kimi 的写法），它们的配置可以直接贴过来
     entries = {**(data.get("mcpServers") or {}), **(data.get("mcp_servers") or {})}
     for name, cfg in entries.items():
+        # 停用的服务不加载："disabled": true（Kimi、Cursor、智码设置页的写法）或 "enabled": false
+        if isinstance(cfg, dict) and (cfg.get("disabled") is True or cfg.get("enabled") is False):
+            continue
         try:
             url = str(cfg.get("url") or "")
             command = str(cfg.get("command") or "")
