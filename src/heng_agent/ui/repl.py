@@ -171,11 +171,14 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin, Tu
         mcp_status: list[tuple[str, bool, str]] | None = None,
         onboarding: bool = False,
         initial_prompt: str | None = None,
+        shadowed_mcp: list[ServerConfig] | None = None,
     ) -> None:
         self.agent = agent
         self.console = console or Console()
         self.untrusted_hooks = untrusted_hooks or []
         self.untrusted_mcp = untrusted_mcp or []
+        #: 和未信任的项目服务同名的用户服务：问完信任再定启动哪份，不信任就启动这些（见 ask_trust_mcp）
+        self.shadowed_mcp = shadowed_mcp or []
         self.provider_name = provider_name
         self.onboarding = onboarding  # 第一次运行（还没有用户配置）：欢迎页之后跑新手引导
         self.mcp_status = list(mcp_status or [])  # 用户级 MCP 服务的连接情况（cli 启动），项目级的信任后追加

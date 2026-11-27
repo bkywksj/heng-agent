@@ -10,7 +10,7 @@ import time
 from rich.markup import escape
 from rich.panel import Panel
 
-from heng_agent.mcp import MCPManager
+from heng_agent.mcp import MCPManager, ServerConfig
 from heng_agent.mcp import trust as mcp_trust
 from heng_agent.ui import mcp_view
 from heng_agent.ui.render import (
@@ -34,19 +34,30 @@ class McpMixin:
         )
         answer = self._ask("信任并启动这些 MCP 服务吗？不认识就选 n [y/n] > ").strip().lower()
         self.untrusted_mcp = []
+        fallback, self.shadowed_mcp = self.shadowed_mcp, []
         if answer not in ("y", "yes", "是"):
             self.console.print("本次不启动项目 MCP 服务。")
+            if fallback:  # 同名的用户服务还没启动（cli 留着等这一问），不信任就用用户自己的
+                names = "、".join(s.name for s in fallback)
+                self.console.print(f"[dim]同名的 {escape(names)} 改用你自己配置里的。[/]")
+                self._start_mcp(fallback)
             return
         mcp_trust(self.agent.settings.home, self.agent.settings.workdir, servers)
+        manager = self._start_mcp(servers)
+        self.console.print(
+            f"已启动 {len(manager.clients)} 个 MCP 服务，接入 {len(manager.tools)} 个工具。配置一改会再问你。"
+        )
+
+    def _start_mcp(self, servers: list[ServerConfig]) -> MCPManager:
+        """当场连上一组服务，工具接进智能体、打印连接结果。"""
         manager = MCPManager(servers, self.agent.settings.workdir, proxy=self.agent.settings.proxy)
         self.mcp_managers.append(manager)
         for tool in manager.tools:
             self.agent.tools[tool.name] = tool
-        self.mcp_status += manager.status
+        for entry in manager.status:
+            self._set_mcp_status(*entry)
         self.print_mcp_status(manager.status)  # 失败的服务在这里以红色显示原因
-        self.console.print(
-            f"已启动 {len(manager.clients)} 个 MCP 服务，接入 {len(manager.tools)} 个工具。配置一改会再问你。"
-        )
+        return manager
 
     def mcp_command(self, rest: str) -> None:
         """/mcp 服务总览（方向键选服务 → 看工具 / 重连 / 停用）；/mcp 服务、/mcp 服务 工具 看工具与详情；

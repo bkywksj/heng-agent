@@ -107,7 +107,7 @@ def _read_servers(path: Path, source: str) -> list[ServerConfig]:
 
 
 def load_servers(home: Path, workdir: Path) -> tuple[list[ServerConfig], list[ServerConfig]]:
-    """返回 (用户配置的服务, 项目配置的服务)；同名时项目的覆盖用户的。
+    """返回 (用户配置的服务, 项目配置的服务)；两边可能同名，启动哪份见 active_servers。
 
     项目的也读 Claude Code 的 .mcp.json（heng-agent 自己的配置同名时优先）。项目里的服务都要用户确认信任才启动。
     """
@@ -116,8 +116,25 @@ def load_servers(home: Path, workdir: Path) -> tuple[list[ServerConfig], list[Se
     heng_project = _read_servers(workdir / ".heng-agent" / "config.json", "project")
     heng_names = {s.name for s in heng_project}
     project = [s for s in claude_project if s.name not in heng_names] + heng_project
-    project_names = {s.name for s in project}
-    return [s for s in user if s.name not in project_names], project
+    return user, project
+
+
+def shadowed(user: list[ServerConfig], project: list[ServerConfig]) -> list[ServerConfig]:
+    """用户配置里和项目服务同名的那些：信任了项目就被项目的覆盖。"""
+    names = {s.name for s in project}
+    return [s for s in user if s.name in names]
+
+
+def active_servers(user: list[ServerConfig], project: list[ServerConfig], trusted: bool) -> list[ServerConfig]:
+    """要启动的服务：信任了项目，同名的用项目的；没信任，用户自己的照常启动。
+
+    以前同名的用户服务一律被项目的覆盖掉，项目的又因为没信任不启动，结果两份都没有
+    （实测：智码工作区的 .mcp.json 也叫 aicoder，没信任时连用户配置的 aicoder 都没了）。
+    """
+    if not trusted:
+        return list(user)
+    hidden = {s.name for s in shadowed(user, project)}
+    return [s for s in user if s.name not in hidden] + project
 
 
 def fingerprint(servers: list[ServerConfig]) -> str:

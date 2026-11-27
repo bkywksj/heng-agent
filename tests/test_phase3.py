@@ -210,3 +210,80 @@ def test_project_mcp_needs_trust_in_print_mode(settings: Settings, monkeypatch: 
     cfg["mcp_servers"]["calc"]["args"].append("--changed")
     (settings.workdir / ".heng-agent/config.json").write_text(json.dumps(cfg), encoding="utf-8")
     assert not is_trusted(settings.home, settings.workdir, load_servers(settings.home, settings.workdir)[1])
+
+
+def _calc_config(marker: Path) -> dict[str, Any]:
+    import sys
+
+    return {"command": sys.executable, "args": [FAKE_SERVER], "env": {"FAKE_MCP_MARKER": str(marker)}}
+
+
+def test_untrusted_project_mcp_does_not_hide_same_name_user_server(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """项目和用户配置了同名服务：没信任项目时用户的照常启动（以前两份都不启动），信任后换成项目的。"""
+    import json
+
+    from fake_model import FakeModel
+    from heng_agent import cli
+    from heng_agent.mcp import load_servers, trust
+
+    user_marker, project_marker = settings.workdir / "user.txt", settings.workdir / "project.txt"
+    settings.home.mkdir()
+    (settings.home / "config.json").write_text(
+        json.dumps({"mcp_servers": {"calc": _calc_config(user_marker)}}), encoding="utf-8"
+    )
+    (settings.workdir / ".mcp.json").write_text(
+        json.dumps({"mcpServers": {"calc": _calc_config(project_marker)}}), encoding="utf-8"
+    )
+    monkeypatch.setenv("HENG_AGENT_HOME", str(settings.home))
+    model = FakeModel([["好"], ["好"]])
+    monkeypatch.setattr(cli, "make_client", lambda profile, max_tokens: model)
+    cli.main(["-p", "hi", "--workdir", str(settings.workdir)])
+    assert user_marker.exists() and not project_marker.exists()
+    trust(settings.home, settings.workdir, load_servers(settings.home, settings.workdir)[1])
+    user_marker.unlink()
+    cli.main(["-p", "hi", "--workdir", str(settings.workdir)])
+    assert project_marker.exists() and not user_marker.exists()  # 同名的只启动项目那份
+
+
+@pytest.mark.parametrize("answer", ["y", "n"])
+def test_trust_question_decides_which_same_name_server_starts(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch, answer: str
+) -> None:
+    """交互模式：同名的用户服务留到信任问题答完再启动——答 y 用项目的，答 n 用用户的。"""
+    import json
+
+    from rich.console import Console
+
+    from fake_model import FakeModel
+    from heng_agent.mcp import load_servers
+    from heng_agent.ui.repl import Repl
+
+    user_marker, project_marker = settings.workdir / "user.txt", settings.workdir / "project.txt"
+    settings.home.mkdir()
+    (settings.home / "config.json").write_text(
+        json.dumps({"mcp_servers": {"calc": _calc_config(user_marker)}}), encoding="utf-8"
+    )
+    (settings.workdir / ".mcp.json").write_text(
+        json.dumps({"mcpServers": {"calc": _calc_config(project_marker)}}), encoding="utf-8"
+    )
+    user, project = load_servers(settings.home, settings.workdir)
+    repl = Repl(
+        Agent(settings, FakeModel([])),
+        console=Console(record=True, width=120, force_terminal=False),
+        untrusted_mcp=project,
+        shadowed_mcp=user,
+    )
+    monkeypatch.setattr(repl, "_ask", lambda message, **kw: answer)
+    try:
+        repl.ask_trust_mcp()
+        assert "mcp__calc__add" in repl.agent.tools  # 哪份都好，工具一定有
+        assert [name for name, ok, _ in repl.mcp_status] == ["calc"]  # 状态只有一行，不重复
+        started = project_marker if answer == "y" else user_marker
+        other = user_marker if answer == "y" else project_marker
+        assert started.exists() and not other.exists()
+        assert repl.shadowed_mcp == [] and repl.untrusted_mcp == []
+    finally:
+        for manager in repl.mcp_managers:
+            manager.close()

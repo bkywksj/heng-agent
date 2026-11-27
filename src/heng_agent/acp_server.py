@@ -32,7 +32,7 @@ from heng_agent.core.config import Settings
 from heng_agent.core.errors import AgentError
 from heng_agent.core.types import Notice, TextDelta, ThinkingDelta, ToolFinished, ToolStarted, TurnDone
 from heng_agent.hooks import is_trusted, load_hooks
-from heng_agent.mcp import MCPManager, load_servers
+from heng_agent.mcp import MCPManager, active_servers, load_servers
 from heng_agent.mcp import is_trusted as mcp_is_trusted
 from heng_agent.model.client import make_client
 from heng_agent.model.providers import ENV_PROFILE, load_profiles
@@ -82,7 +82,7 @@ def build_session(cwd: Path, session_id: str | None = None) -> Session:
     mcp_ok = mcp_is_trusted(home, cwd, project_mcp)
     if (project_hooks and not hooks_ok) or (project_mcp and not mcp_ok):
         notes.append("这个项目的钩子 / MCP 服务还没被信任，本次跳过（在终端里运行一次 heng-agent 确认信任即可）")
-    manager = MCPManager(user_mcp + (project_mcp if mcp_ok else []), cwd, proxy=settings.proxy)
+    manager = MCPManager(active_servers(user_mcp, project_mcp, mcp_ok), cwd, proxy=settings.proxy)
     notes += [f"MCP：{error}（跳过这个服务）" for error in manager.errors]
     allow, deny, _, _ = configfile.permission_rules(home, cwd, claude_user=settings.claude_user_config)
     store = SessionStore.find(home, cwd, session_id) if session_id else SessionStore(home, cwd)

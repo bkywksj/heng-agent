@@ -27,7 +27,7 @@ from heng_agent.core.errors import AgentError
 from heng_agent.core.types import AgentEvent, Notice, TextDelta, ToolFinished, ToolStarted
 from heng_agent.core.version import is_dev, prepare_dev_home, version_label
 from heng_agent.hooks import is_trusted, load_hooks
-from heng_agent.mcp import MCPManager, load_servers
+from heng_agent.mcp import MCPManager, active_servers, load_servers, shadowed
 from heng_agent.mcp import is_trusted as mcp_is_trusted
 from heng_agent.model.client import make_client
 from heng_agent.model.providers import ENV_PROFILE, PROJECT_CONFIG, Profile, config_path, load_profiles
@@ -438,7 +438,9 @@ def _main(argv: list[str] | None = None) -> int:
     # 交互模式在后台连 MCP：欢迎页不用等最慢的服务（实测要 5～7 秒），用户提交第一句时再接入（Repl._sync_mcp）；
     # -p 一开始就要用工具，照旧连完再往下走
     interactive = args.prompt is None
-    servers = user_mcp + (project_mcp if mcp_trusted else [])
+    # 交互模式没信任时欢迎页之后会问一句：和项目同名的用户服务等用户答完再启动（答信任就用项目的，不用先起后关）
+    waiting = shadowed(user_mcp, project_mcp) if interactive and not mcp_trusted else []
+    servers = [s for s in active_servers(user_mcp, project_mcp, mcp_trusted) if s not in waiting]
     manager = MCPManager(servers, settings.workdir, background=interactive, proxy=settings.proxy)
     if args.prompt is not None:  # 交互模式由欢迎页逐行显示连接状态，这里只管非交互
         for error in manager.errors:
@@ -502,6 +504,7 @@ def _main(argv: list[str] | None = None) -> int:
             agent,
             untrusted_hooks=[] if trusted else project_hooks,
             untrusted_mcp=[] if mcp_trusted else project_mcp,
+            shadowed_mcp=waiting,
             provider_name=provider_name,
             mcp_status=manager.status,
             onboarding=needs_onboarding(settings.home) and not args.provider,
