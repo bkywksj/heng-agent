@@ -24,7 +24,7 @@ class ToolSearchTool(Tool):
     description = (
         "搜索外部（MCP）工具并加载。外部工具很多，默认没有加载；需要时用关键词搜（中英文都可以，多个词空格分开，"
         "如「截图 窗口」「git push」「deploy server」），搜到的工具立即加载，下一步就能直接调用。"
-        "知道确切名字时写 select:名字1,名字2 直接加载。"
+        "知道确切名字时写 select:名字1,名字2 直接加载（只写工具本名、不带 mcp__服务__ 前缀也行）。"
     )
     input_schema = {
         "type": "object",
@@ -50,8 +50,13 @@ class ToolSearchTool(Tool):
             return ToolResult("query 不能为空", is_error=True)
         if query.startswith("select:"):
             wanted = [n.strip() for n in query[len("select:") :].split(",") if n.strip()]
-            found = [tools[n] for n in wanted if n in tools]
-            missing = [n for n in wanted if n not in tools]
+            found: list[Tool] = []
+            missing: list[str] = []
+            for name in wanted:
+                hits = _by_name(name, tools)
+                found += [t for t in hits if t not in found]
+                if not hits:
+                    missing.append(name)
         else:
             limit = max(1, min(int(args.get("max_results") or DEFAULT_RESULTS), MAX_RESULTS))
             found = search(query, list(tools.values()))[:limit]
@@ -78,6 +83,14 @@ def search(query: str, tools: list[Tool]) -> list[Tool]:
             scored.append((score, tool.name, tool))
     scored.sort(key=lambda x: (-x[0], x[1]))
     return [t for _, _, t in scored]
+
+
+def _by_name(name: str, tools: dict[str, Tool]) -> list[Tool]:
+    """按名字找：完整名（mcp__服务__工具）直接对上；只写了工具本名（说明文件里常这么写，如 recent_projects）
+    时，找所有服务里叫这个名字的——几个服务都有就都加载，让模型自己挑。"""
+    if name in tools:
+        return [tools[name]]
+    return [t for n, t in tools.items() if n.endswith(f"__{name}")]
 
 
 def _first_line(text: str) -> str:

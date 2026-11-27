@@ -34,7 +34,7 @@ for line in sys.stdin:
     print("这是一行日志，不是协议内容", file=sys.stdout, flush=True)  # 混在标准输出里的噪音，客户端要能跳过
     if method == "initialize":
         reply(rid, {"protocolVersion": params.get("protocolVersion"), "capabilities": {"tools": {}},
-                    "serverInfo": {"name": "fake", "version": "0"}})  # fmt: skip
+                    "serverInfo": {"name": "fake", "version": "0"}, "instructions": "要算加法就用 add。"})  # fmt: skip
     elif method == "tools/list":
         page = 1 if params.get("cursor") == "p2" else 0
         reply(rid, {"tools": [TOOLS[page]], **({"nextCursor": "p2"} if page == 0 else {})})

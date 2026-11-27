@@ -65,6 +65,8 @@ def estimate_tokens(text: str) -> float:
 
 
 MCP_DEFER_BASE_CAP = 200_000  # 上面的比例最多按这么长的上下文算（见 defer_mcp）
+#: 每个 MCP 服务的使用说明最多带这么多字进系统提示词：接 6 个服务时全文要 1 万多字，每问都带太贵
+MAX_MCP_INSTRUCTIONS = 2000
 CHARS_PER_TOKEN = 3  # 粗估：工具声明多是 JSON 与英文，约 3 字符一个 token
 #: 用量记哪几项：缓存读 / 写单独记，计价倍数不同（见 Profile.cost）
 USAGE_KEYS = ("input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens")
@@ -296,15 +298,41 @@ class Agent:
         权限模式以前写死在启动时生成的那段里，中途切了模式模型还以为是原来的；现在每轮按当前模式生成。
         """
         parts = [self.system, mode_section(self.permissions.mode)]
-        if self.defer_mcp():
-            counts: dict[str, int] = {}
-            for tool in self._mcp_tools():
-                server = tool.name.split("__")[1] if tool.name.count("__") >= 2 else "?"
-                counts[server] = counts.get(server, 0) + 1
-            servers = "、".join(f"{name}（{n} 个）" for name, n in counts.items())
-            parts.append(f"# 外部工具（MCP）\n\n已接入：{servers}。这些工具太多，默认没有加载；"
-                         "用户的任务可能用得上时，先用 tool_search 按关键词搜，搜到的下一步就能调用。")  # fmt: skip
+        if mcp := self._mcp_section():
+            parts.append(mcp)
         return "\n\n".join(parts)
+
+    def _mcp_section(self) -> str:
+        """外部工具那段：按需加载时的用法 + 各服务自己给的使用说明。
+
+        只写一句「已接入 aicoder（100 个）」时，小模型（实测 Ollama 上的 qwen）不知道里面有什么，
+        用户问「我有哪些项目」它就用 bash 满盘乱找、编路径，一次 tool_search 都不调；说明文件里写着
+        recent_projects，它在工具列表里找不到这个名字，也退回去自己猜。
+        """
+        counts: dict[str, int] = {}
+        notes: dict[str, str] = {}
+        for tool in self._mcp_tools():
+            server = getattr(tool, "server", None) or (tool.name.split("__")[1] if tool.name.count("__") >= 2 else "?")
+            counts[server] = counts.get(server, 0) + 1
+            if note := str(getattr(tool, "instructions", "") or "").strip():
+                notes.setdefault(server, note)
+        if not counts:
+            return ""
+        lines = ["# 外部工具（MCP）"]
+        if self.defer_mcp():
+            servers = "、".join(f"{name}（{n} 个）" for name, n in counts.items())
+            lines.append(f"已接入：{servers}。这些工具太多，默认没有加载；"
+                         "用户的任务可能用得上时，先用 tool_search 按关键词搜，搜到的下一步就能调用。"
+                         "说明文件或下面的服务说明里提到的工具名（如 recent_projects）不在你的工具列表里，"
+                         "就是还没加载的外部工具：用 tool_search 搜这个名字（或 select:名字），"
+                         "不要改用 bash、glob 自己去找、去猜路径。")  # fmt: skip
+        elif not notes:
+            return ""  # 工具全带上了，又没有服务说明：工具声明本身就够了
+        for server, note in notes.items():
+            if len(note) > MAX_MCP_INSTRUCTIONS:
+                note = note[:MAX_MCP_INSTRUCTIONS].rsplit("\n", 1)[0] + "\n…（说明太长，后面截掉了）"
+            lines.append(f"## {server} 的使用说明（服务自己提供）\n\n{note}")
+        return "\n\n".join(lines)
 
     def _present_plan(self, tool: Tool, args: dict[str, Any], approve: Approver,
                       on_event: Callable[[AgentEvent], None]) -> ToolResult:  # fmt: skip

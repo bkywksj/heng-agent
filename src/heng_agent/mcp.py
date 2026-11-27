@@ -143,6 +143,9 @@ class _Session:
     """stdio 与 http 共用的握手：initialize → notifications/initialized → tools/list（支持分页）。"""
 
     config: ServerConfig
+    #: 握手应答里服务给的使用说明（MCP 的 instructions）：什么场景用哪个工具。按需加载时模型看不到工具清单，
+    #: 只靠它知道这个服务能干什么（智码的说明里写着「我那个 X 项目 → recent_projects」）
+    instructions: str = ""
 
     def request(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         raise NotImplementedError
@@ -157,6 +160,7 @@ class _Session:
         """握手并取工具清单。"""
         result = self.request("initialize", {"protocolVersion": PROTOCOL_VERSION, "capabilities": {},
                                              "clientInfo": {"name": "heng-agent", "version": __version__}})  # fmt: skip
+        self.instructions = str(result.get("instructions") or "").strip()
         self.on_initialized(result)
         self.notify("notifications/initialized")
         tools: list[dict[str, Any]] = []
@@ -362,10 +366,16 @@ class MCPTool(Tool):
 
     def __init__(self, client: _Session, spec: dict[str, Any]) -> None:
         self.client = client
+        self.server = client.config.name
         self.remote_name = str(spec["name"])
         self.name = _tool_name(client.config.name, self.remote_name)  # type: ignore[misc]
         self.description = f"[MCP {client.config.name}] {spec.get('description', '')}".strip()  # type: ignore[misc]
         self.input_schema = spec.get("inputSchema") or {"type": "object", "properties": {}}  # type: ignore[misc]
+
+    @property
+    def instructions(self) -> str:
+        """所属服务的使用说明（重连后跟着新连接走）。"""
+        return self.client.instructions
 
     def run(self, args: dict[str, Any], ctx: ToolContext) -> ToolResult:
         try:

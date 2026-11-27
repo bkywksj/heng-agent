@@ -144,6 +144,9 @@ def test_mcp_handshake_list_call_and_close(settings: Settings) -> None:
         failed = tools["mcp__calc__fail"].run({}, ctx)  # type: ignore[arg-type]
         assert failed.is_error and failed.content == "出错了"
         assert tools["mcp__calc__add"].kind == "mcp" and "[MCP calc]" in tools["mcp__calc__add"].description
+        # 握手应答里的使用说明记下来了，挂在每个工具上（智能体据此写进系统提示词）
+        assert tools["mcp__calc__add"].instructions == "要算加法就用 add。"
+        assert tools["mcp__calc__add"].server == "calc"
     finally:
         manager.close()
     assert client.proc.poll() is not None  # type: ignore[attr-defined]  # 进程已关掉

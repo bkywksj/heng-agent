@@ -86,3 +86,45 @@ def test_big_context_window_still_defers_big_mcp_sets(tmp_path: Path) -> None:
     small = [FakeMCP("calc", "add", "加法")]
     settings = Settings(workdir=tmp_path, home=tmp_path / "h", context_window=1_000_000)
     assert not Agent(settings, FakeModel([]), tools=[*builtin_tools(), *small]).defer_mcp()
+
+
+def _with_note(tool: FakeMCP, note: str) -> FakeMCP:
+    tool.server = tool.name.split("__")[1]  # type: ignore[attr-defined]
+    tool.instructions = note  # type: ignore[attr-defined]
+    return tool
+
+
+def test_server_instructions_go_into_system_prompt(tmp_path: Path) -> None:
+    """服务自己给的使用说明写进系统提示词：按需加载时模型看不到工具清单，只写「aicoder（100 个）」时
+    小模型（Ollama 上的 qwen）问「我有哪些项目」就用 bash 满盘乱找，一次 tool_search 都不调（实测）。"""
+    tools: list[Tool] = [_with_note(FakeMCP("aicoder", "recent_projects", "最近的项目"),
+                                    "我那个 X 项目 → recent_projects / inspect_project")]  # fmt: skip
+    tools += [_with_note(FakeMCP("aicoder", f"tool_{i}", "别的"), "我那个 X 项目 → recent_projects") for i in range(40)]
+    tools.append(_with_note(FakeMCP("reeve", "deploy", "部署"), "长" * 5000))
+    settings = Settings(workdir=tmp_path, home=tmp_path / "h", context_window=20_000)
+    agent = Agent(settings, FakeModel([]), tools=[*builtin_tools(), *tools])
+    assert agent.defer_mcp()
+    prompt = agent.system_prompt()
+    assert "## aicoder 的使用说明" in prompt and "recent_projects / inspect_project" in prompt
+    assert prompt.count("## aicoder 的使用说明") == 1  # 每个服务只写一次，不是每个工具一次
+    assert "不要改用 bash" in prompt  # 说明里提到的工具名不在列表里：先 tool_search
+    assert "长" * 2000 in prompt and "长" * 2001 not in prompt and "说明太长" in prompt  # 太长的截断
+    # 工具全带上（不按需加载）时也写服务说明，但不写 tool_search 的用法
+    full = Agent(settings.model_copy(update={"mcp_tool_search": "off"}), FakeModel([]),
+                 tools=[*builtin_tools(), *tools])  # fmt: skip
+    assert "## aicoder 的使用说明" in full.system_prompt() and "tool_search" not in full.system_prompt()
+    # 没有服务说明、也不按需加载：不加这一段
+    plain = Agent(Settings(workdir=tmp_path, home=tmp_path / "h"), FakeModel([]),
+                  tools=[*builtin_tools(), FakeMCP("calc", "add", "加法")])  # fmt: skip
+    assert "外部工具（MCP）" not in plain.system_prompt()
+
+
+def test_select_by_bare_tool_name(tmp_path: Path) -> None:
+    """说明文件里常只写工具本名（recent_projects）：select 不带 mcp__服务__ 前缀也要能加载。"""
+    settings = Settings(workdir=tmp_path, home=tmp_path / "h", context_window=20_000, mcp_tool_search="on")
+    tools = [*_mcp_tools(), FakeMCP("other", "deploy_project", "另一个服务的部署")]
+    agent = Agent(settings, FakeModel([]), tools=[*builtin_tools(), *tools])
+    out = agent.tools["tool_search"].run({"query": "select:capture_window,deploy_project,nope"}, None)  # type: ignore[arg-type]
+    assert "已加载 3 个" in out.content and "没有这些工具：nope" in out.content  # 两个服务都有的都加载
+    specs = _names(agent.tool_specs())
+    assert {"mcp__agileshot__capture_window", "mcp__reeve__deploy_project", "mcp__other__deploy_project"} <= specs
