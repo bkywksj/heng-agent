@@ -4,7 +4,8 @@
 状态栏的百分比也偏高。现在：
 1. 配置档里写了 context_window：一直用它（推断错了可以手动纠正，/config set profiles.名字.context_window 数字）；
 2. 接口查得到：Anthropic 协议问 /v1/models/{模型}（官方返回 max_input_tokens），OpenAI 协议看模型列表里
-   有没有带 context_length 之类的字段（OpenRouter 带）；中转站多半查不到，查不到不算错；
+   有没有带 context_length 之类的字段（OpenRouter 带）；都查不到再按 Ollama 问一次 /api/show（两种协议它都兼容，
+   但上面两处都不带长度）；中转站多半查不到，查不到不算错；
 3. 按模型名推断：只收录核对过官方文档的（Claude 见 claude-api 技能的模型表；其他家见 VENDOR_RULES 每行的出处）；
 4. 都没有：用设置里的 context_window（默认 128k）。
 
@@ -91,19 +92,27 @@ def fetch(profile: Profile, transport: httpx.BaseTransport | None = None) -> int
     """向服务商查这个模型的上下文长度；查不到（不支持、出错、中转站不转发）返回 None。
 
     会发网络请求，别在界面线程里调。"""
-    base = profile.base_url.rstrip("/")
     try:
         with http_client(timeout=8.0, proxy=profile.proxy, transport=transport) as http:
-            if profile.protocol == "anthropic":
-                from heng_agent.model.client import ANTHROPIC_VERSION
+            return _fetch_listed(http, profile) or _fetch_ollama(http, profile)
+    except httpx.HTTPError:
+        return None
 
-                resp = http.get(f"{base.removesuffix('/v1')}/v1/models/{profile.model}",
-                                headers={"anthropic-version": ANTHROPIC_VERSION, **profile.auth_headers()})  # fmt: skip
-                data = resp.json() if resp.status_code < 400 else {}
-                return _positive(data.get("max_input_tokens") if isinstance(data, dict) else None)
-            resp = http.get(f"{base}/models", headers=profile.auth_headers())
-            items = resp.json().get("data", []) if resp.status_code < 400 else []
-    except (httpx.HTTPError, ValueError, AttributeError):
+
+def _fetch_listed(http: httpx.Client, profile: Profile) -> int | None:
+    """协议自带的模型接口：Anthropic 的 /v1/models/{模型}、OpenAI 的模型列表。"""
+    base = profile.base_url.rstrip("/")
+    try:
+        if profile.protocol == "anthropic":
+            from heng_agent.model.client import ANTHROPIC_VERSION
+
+            resp = http.get(f"{base.removesuffix('/v1')}/v1/models/{profile.model}",
+                            headers={"anthropic-version": ANTHROPIC_VERSION, **profile.auth_headers()})  # fmt: skip
+            data = resp.json() if resp.status_code < 400 else {}
+            return _positive(data.get("max_input_tokens") if isinstance(data, dict) else None)
+        resp = http.get(f"{base}/models", headers=profile.auth_headers())
+        items = resp.json().get("data", []) if resp.status_code < 400 else []
+    except (ValueError, AttributeError):
         return None
     for item in items if isinstance(items, list) else []:
         if isinstance(item, dict) and item.get("id") == profile.model:
@@ -111,6 +120,22 @@ def fetch(profile: Profile, transport: httpx.BaseTransport | None = None) -> int
                 if (found := _positive(item.get(key))) is not None:
                     return found
     return None
+
+
+def _fetch_ollama(http: httpx.Client, profile: Profile) -> int | None:
+    """Ollama 的 /api/show：只认模型参数里的 num_ctx（实际按它分配上下文）。
+
+    不用 model_info 里的 context_length：那是模型本身的上限，实际用多少由服务端的 OLLAMA_CONTEXT_LENGTH 定，
+    从外面查不到（实测 qwen3.5:9b 报 262144，服务端设了 32768 就只跑 32K）。没写 num_ctx 就当查不到。"""
+    root = profile.base_url.rstrip("/").removesuffix("/v1")
+    try:
+        resp = http.post(f"{root}/api/show", json={"model": profile.model}, headers=profile.auth_headers())
+        data = resp.json() if resp.status_code < 400 else {}
+    except ValueError:
+        return None
+    params = data.get("parameters") if isinstance(data, dict) else None
+    match = re.search(r"^num_ctx\s+(\d+)\s*$", params, re.MULTILINE) if isinstance(params, str) else None
+    return _positive(int(match.group(1))) if match else None
 
 
 def resolve(profile: Profile | None, fetched: int | None, fallback: int) -> tuple[int, str]:

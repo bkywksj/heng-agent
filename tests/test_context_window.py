@@ -103,6 +103,28 @@ def test_fetch_openai_model_list() -> None:
     assert cw.fetch(profile, transport=_transport({"/api/v1/models": httpx.Response(200, json=bare)})) is None
 
 
+def test_fetch_ollama_show_num_ctx() -> None:
+    """Ollama 的 /v1/models/{模型} 不带长度（实测只有 id、owned_by），退到 /api/show 读 num_ctx。"""
+    params = (
+        "top_p                          0.95\nnum_ctx                        262144\ntemperature                    1"
+    )
+    show = {"parameters": params, "model_info": {"qwen35.context_length": 262144}}
+    bare = httpx.Response(200, json={"id": "qwen3.5-cc", "object": "model", "owned_by": "library"})
+    for protocol, base in (("anthropic", "http://127.0.0.1:11435"), ("openai", "http://127.0.0.1:11435/v1")):
+        profile = Profile(protocol=protocol, base_url=base, model="qwen3.5-cc")
+        routes = {"/v1/models/qwen3.5-cc": bare, "/v1/models": httpx.Response(200, json={"data": []}),
+                  "/api/show": httpx.Response(200, json=show)}  # fmt: skip
+        assert cw.fetch(profile, transport=_transport(routes)) == 262_144
+
+
+def test_fetch_ollama_without_num_ctx_is_unknown() -> None:
+    """没写 num_ctx：实际长度由服务端 OLLAMA_CONTEXT_LENGTH 定、查不到，不拿 model_info 里的模型上限冒充。"""
+    show = {"parameters": "temperature                    1", "model_info": {"qwen35.context_length": 262144}}
+    profile = Profile(protocol="anthropic", base_url="http://127.0.0.1:11435", model="qwen3.5:9b")
+    assert cw.fetch(profile, transport=_transport({"/api/show": httpx.Response(200, json=show)})) is None
+    assert cw.fetch(profile, transport=_transport({"/api/show": httpx.Response(200, text="<html>")})) is None
+
+
 def test_agent_uses_fetched_value_for_its_model_only(tmp_path: Path) -> None:
     client = FakeModel([])
     client.profile = _profile()  # type: ignore[attr-defined]
