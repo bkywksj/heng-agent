@@ -53,7 +53,8 @@ core                消息与事件的数据类型、配置、错误、信任记
 
 ## 🔴 Git
 
-- 远程仓库一律私有。推送只走 Sigil（Gitee `origin`、GitCode `gitcode`），不用普通 `git push`。
+- 推送只走 Sigil，不用普通 `git push`。两个远程都要推：`origin`（GitHub 主仓库，公开，凭据 `github1`）、
+  `gitee`（Gitee 镜像，凭据 `gitee`）。新建的其他仓库一律私有。
 - 逐个文件 `git add`，不用 `git add -A`；功能与注释改动分开提交。
 - 提交信息用中文，写清「为什么」：修 bug 写根因与怎么发现的，新功能写用户看得见的变化。
 
