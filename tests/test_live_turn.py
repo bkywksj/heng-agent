@@ -250,6 +250,28 @@ def test_turn_output_follows_window_width(tmp_path: Path) -> None:
     assert repl.console.width == 90
 
 
+def test_spinner_when_text_pauses_before_tool_call(tmp_path: Path) -> None:
+    """文字说完、工具调用还没到时补一个转圈：Ollama 要等工具调用整个生成完才交出来，本地模型慢，
+    「好的，让我先看看……」之后十来秒屏幕不动，用户以为卡死了（实测）。"""
+    from heng_agent.core.types import TextDelta, ToolStarted
+
+    repl = Repl(Agent(Settings(workdir=tmp_path, home=tmp_path / "h"), FakeModel([])))
+    real = Console(width=100, file=io.StringIO(), force_terminal=True)
+    repl._turn_real_console = real
+    repl.console = Console(width=100, file=io.StringIO(), force_terminal=True)
+    repl._box = None  # 不走输入框那条路：只测「正在进行」那块画什么
+    repl._turn_live_render = repl._turn_activity = None
+    repl._turn_started = time.time()
+    repl._on_event(TextDelta("好的！让我先看看。"))
+    assert repl._text_at is not None
+    assert "还在生成" not in str(repl._turn_live_text())  # 刚说完：不转
+    repl._text_at -= 2  # 停了 2 秒
+    assert "还在生成" in str(repl._turn_live_text())
+    repl._on_event(ToolStarted(id="1", name="glob", input={"pattern": "*"}))
+    assert repl._text_at is None and "还在生成" not in str(repl._turn_live_text())  # 工具来了：换成工具的转圈
+    repl._unspin()
+
+
 SEND_NOW = "\x18\x13"  # Ctrl+X Ctrl+S
 
 

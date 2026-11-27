@@ -201,6 +201,7 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin, Tu
         self._setup_subagents()  # 子智能体面板、后台子智能体做完时的通知（见 repl_subagents）
         self._turn_live_render: Any = None  # 回答中：还没写完的那段回复，画在输入框上方（见 repl_turn）
         self._turn_activity: Any = None  # 回答中：转圈旁边的文字
+        self._text_at: float | None = None  # 最近一段回复文字到达的时刻；收到别的事件就清掉
         self._turn_started = time.time()  # 当前这一问是什么时候提的：结尾那行写时间与用时
         self._tool_started = time.time()  # 正在跑的工具什么时候开始的：等待动画计时、结果后面写用时
         # 状态栏要起子进程才拿得到的数据（git 分支、用户的状态栏命令）：后台跑、缓存，跑完重画输入框
@@ -597,6 +598,7 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin, Tu
             self._flush_thought()
         if isinstance(event, TextDelta):
             self._unspin()
+            self._text_at = time.monotonic()  # 文字停久了要补转圈：见 ReplTurn._text_paused
             # 流式 Markdown，分段固定：写完的段落永久打印、不再改，实时区域只留最后没写完的那一段。
             # 不能整段回复一直重绘：Live 只能改写屏幕可见范围，回复长过一屏后上面滚出去的部分改不了，
             # 只好在下面再打一遍——实测「…统计信息如下：」重复了十几次
@@ -614,6 +616,7 @@ class Repl(ApprovalMixin, McpMixin, SessionMixin, MemoryMixin, CommandsMixin, Tu
                     self._live.start()
                 self._live.update(self._reply(self._buf, first=not self._reply_started))
             return
+        self._text_at = None
         self._end_text()
         self._unspin()
         if isinstance(event, UserInterjection) and event.text.startswith(NOTICE_PREFIX):

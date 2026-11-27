@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import io
 import threading
+import time
 from typing import TYPE_CHECKING, Any
 
 from prompt_toolkit.formatted_text import ANSI, AnyFormattedText
@@ -25,12 +26,15 @@ from rich.text import Text
 
 from heng_agent.tools.base import Tool
 from heng_agent.ui.inputbox import TurnHooks, TurnSignal
+from heng_agent.ui.render import Ticker
 
 if TYPE_CHECKING:
     from heng_agent.ui.inputbox import InputBox
 
 #: 「正在进行」那块最多画几行：还没写完的那段回复很长时只显示最后这些行（写完的段落会打印到上方）
 LIVE_MAX_LINES = 12
+#: 回复文字停了这么多秒还没有下一个事件，就在文字下面转圈（见 _text_paused）
+TEXT_PAUSE_SPIN = 1.5
 #: 回答中也马上执行的命令：只看状态、或改下一次请求才生效的设置（同 Claude Code：/status、/usage、/tasks、/effort……）。
 #: 别的命令（会动对话、切服务商、要你选东西的）排队，这一问结束后执行
 INSTANT_COMMANDS = frozenset({"status", "usage", "cost", "stats", "tasks", "bashes", "context", "todos",
@@ -96,6 +100,7 @@ class TurnMixin:
         self._turn_real_console = real
         self._turn_live_render: Any = None  # 还没写完的那段回复（rich 可渲染对象）
         self._turn_activity: Any = None  # 转圈旁边的文字（render.Ticker）
+        self._text_at: float | None = None  # 上一问被打断时可能没清：别一开始就显示「还在生成」
         self._turn_approval: tuple[Tool, dict[str, Any], threading.Event, list[Any]] | None = None
         self._turn_approval_lock = threading.Lock()
         outcome: dict[str, BaseException] = {}
@@ -219,6 +224,15 @@ class TurnMixin:
 
     # ---------- 「正在进行」那块 ----------
 
+    def _text_paused(self) -> bool:
+        """回复文字停了一会儿、下一件事（工具调用、这一问结束）还没来：模型多半在写工具调用的参数。
+
+        Ollama 等服务要等工具调用整个生成完才一次交出来，文字说完到工具出现之间屏幕上什么都不动——
+        本地模型慢，实测停了十来秒，用户以为卡死了、不会再继续。这时补一个转圈。
+        """
+        last = getattr(self, "_text_at", None)
+        return last is not None and time.monotonic() - last >= TEXT_PAUSE_SPIN
+
     def _turn_live_text(self) -> AnyFormattedText:
         """输入框上方那块：还没写完的那段回复（最后几行）+ 转圈与计时。每 0.1 秒重画时调。"""
         real = self._turn_real_console
@@ -231,6 +245,9 @@ class TurnMixin:
             parts.append(self._turn_live_render)
         if self._turn_activity is not None:
             parts.append(_Spinner(self._turn_activity))
+        elif self._text_paused():
+            parts.append(_Spinner(Ticker("还在生成…", "ESC 中断", self._turn_started,  # type: ignore[attr-defined]
+                                         tokens=lambda: self.agent.turn_output_tokens)))  # fmt: skip
         if not parts:
             return ""
         out = io.StringIO()
