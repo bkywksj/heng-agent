@@ -145,3 +145,34 @@ def test_box_stays_small_when_terminal_has_lots_of_room(tmp_path: Path) -> None:
     assert rows_with("", "╰") == [2] and rows_with("", "│") == [1]  # 空框：上边框、1 行输入、下边框
     assert rows_with("一\n二\n三", "╰") == [4]  # 三行内容：框长到 5 行
     assert rows_with("x" * 200, "╰") == [4]  # 一行很长、自动折成 3 行：框也跟着长
+
+
+def _count_idle_redraws(tmp_path: Path, agents: list[tuple[int, str]], idle: float = 1.6) -> int:
+    """输入框空闲 idle 秒后按 Enter，返回这期间画了几次（每画一次都会取一次状态栏）。"""
+    draws = 0
+
+    def toolbar() -> str:
+        nonlocal draws
+        draws += 1
+        return "状态栏"
+
+    with create_pipe_input() as pipe:
+        timer = threading.Timer(idle, pipe.send_text, [ENTER])
+        timer.start()
+        box = InputBox(history=InMemoryHistory(), commands=SlashCompleter(lambda: {}), workdir=tmp_path,
+                       toolbar=toolbar, get_mode=lambda: "ask", set_mode=lambda m: None, modes=MODES,
+                       style=STYLE, input=pipe, output=DummyOutput(), agents=lambda: agents)  # fmt: skip
+        box.prompt()
+        timer.cancel()
+    return draws
+
+
+def test_idle_box_does_not_redraw_on_a_timer(tmp_path: Path) -> None:
+    """空闲且没有子智能体在跑：不定时重画。
+
+    每次重画哪怕画面没变，也会往终端写光标显隐、换行模式开关（实测经 ConPTY 每次 37 字节）；
+    以前空闲也每 0.5 秒重画，智码等宿主据此一直当它在回答，答完后侧边栏圆点、页签图标一直闪。"""
+    quiet = _count_idle_redraws(tmp_path, [])
+    busy = _count_idle_redraws(tmp_path, [(1, "general  查代码   12s")])
+    assert busy - quiet >= 2  # 有子智能体在跑：面板上的用时照样每 0.5 秒走一格
+    assert quiet <= 3  # 只剩启动时、历史加载完、按 Enter 这几次

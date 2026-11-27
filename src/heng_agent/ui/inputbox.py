@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import threading
 import time
@@ -58,6 +59,7 @@ REWIND = "/rewind"  # 双击 ESC 时 prompt() 返回这个，由界面弹出回�
 ESC_TIMEOUT = 0.1  # 单独 ESC 的确认等待（秒）
 KEY_SEQUENCE_TIMEOUT = 0.2  # 多键绑定（Alt+V = ESC v）等下一个键的时间；终端里这些组合键是整段到达的
 MAX_TODO_LINES = 12  # 输入框上方任务清单最多占几行
+AGENTS_TICK_SECONDS = 0.5  # 空闲时有子智能体在跑，面板上的用时多久走一格
 
 
 class PathCompleter(Completer):
@@ -613,8 +615,10 @@ class InputBox:
         # 看后面跟不跟键——两次 ESC 各被拖近 1 秒，间隔超出双击窗口，双击 ESC 就认不出来（实测卡住）
         app.timeoutlen = KEY_SEQUENCE_TIMEOUT
         _erase_reflowed_on_resize(app)
-        # 计时、转圈、流式文字要动起来；平时有后台子智能体在跑时面板上的用时也要动
-        app.refresh_interval = 0.1 if self.turn is not None else 0.5
+        # 回答中：计时、转圈、流式文字要动起来。空闲时不定时重画（由 _tick_agents 只在有子智能体在跑时重画）：
+        # 每次重画哪怕画面一点没变，也会往终端写一串光标显隐、换行模式开关，智码等宿主据此判断「还在输出」，
+        # 以前空闲也每 0.5 秒重画一次，答完之后宿主一直当它在回答（侧边栏圆点、页签图标一直闪）
+        app.refresh_interval = 0.1 if self.turn is not None else None
         self._buffer = buffer
         self.agent_pick = None
         buffer.on_text_changed += lambda _: setattr(self, "agent_pick", None)  # 接着打字：退出面板选择
@@ -635,10 +639,24 @@ class InputBox:
         buffer.load_history_if_not_yet_loaded()
         if self.turn is not None:
             self.turn.before_draw()
+        else:
+            app.create_background_task(self._tick_agents(app))
         with self._signal_lock:
             pending = bool(self._signals)
         if pending:  # 收起期间来了信号（如确认完之后这一问正好结束）：一画出来就收
             self._exit_for_signal(app, None)
+
+    async def _tick_agents(self, app: Application[Any]) -> None:
+        """空闲时只在有子智能体在跑时定时重画（面板上的用时要走）；全部跑完再画一次，把面板那几行收掉。
+
+        输入框关掉时 prompt_toolkit 会取消这个后台任务。"""
+        running = False
+        while True:
+            await asyncio.sleep(AGENTS_TICK_SECONDS)
+            now = bool(self.agents())
+            if now or running:
+                app.invalidate()
+            running = now
 
 
 # ---------- 窗口变窄时擦干净 ----------
